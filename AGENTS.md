@@ -196,6 +196,7 @@ dsh web
 
 ## Maintenance
 
+- **版本策略（2026-09-16 用户约定）**：持续优化代码，后续版本只递增 patch 位（2.5.1、2.5.2 …），保持 2.5.x 不升 minor/major；每次发版同步 package.json version 与 README「更新内容」小节，过完整门禁（verify / test:core / build / git diff --check）后提交推送。
 - **fork wzxmt-zhc 对账/摘抄专项文档**：`docs/fork-wzxmt-zhc/` —— README（对账快照 + 接手协议）、`backlog.md`（摘抄清单与决策，三档：直接摘/对账合并/参考不摘）、`log.md`（推进日志，做完一步记一条）。接手该专项先读 README；动手前必须重新 fetch fork（未配置 remote，命令在 README 接手协议里），快照会过时。
 - This file is a living reference. Whenever you discover a new repo-specific command, convention, or pitfall, update it in place.
 - Keep it accurate and concise; remove stale entries as the codebase changes (e.g. removed features, renamed files, new scripts).

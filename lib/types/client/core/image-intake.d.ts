@@ -36,6 +36,20 @@ export interface ImageIntakeDeps {
 }
 /** A file counts as an image only when the picker reported an image/* MIME type. */
 export declare function isImageFile(file: File): boolean;
+/** Engine capability signals probed once at module load (component layer). */
+export interface ImageIntakeSupport {
+    readonly hasDataTransfer: boolean;
+    readonly hasDragEventConstructor: boolean;
+    readonly hasLegacyDragEvent: boolean;
+}
+/**
+ * Whether this engine can stage a synthetic image drop at all: it needs a
+ * DataTransfer carrier plus at least one drop-event construction path. When
+ * false the picker button is not rendered — a dead button is worse than no
+ * button (modern WebViews all pass; only engines without any constructor
+ * surface fail).
+ */
+export declare function canStageImageDrop(support: ImageIntakeSupport): boolean;
 /**
  * Filter `files` down to images and stage them as a single drop event.
  * @returns the staged drop, or null when there is nothing to stage (no

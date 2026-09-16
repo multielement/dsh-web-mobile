@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isImageFile, stageImagesAsDrop, type ImageIntakeDeps, type StagedDrop } from '../src/client/core/image-intake.ts'
+import { canStageImageDrop, isImageFile, stageImagesAsDrop, type ImageIntakeDeps, type StagedDrop } from '../src/client/core/image-intake.ts'
 
 /** Node has no DOM: File is typed by lib.dom but not constructible in tests. */
 function fakeFile(type: string): File {
@@ -145,4 +145,11 @@ test('returns null when both event paths are unavailable', () => {
   })
   assert.equal(staged, null)
   assert.equal(transfer.items.added.length, 1)
+})
+
+test('intake support requires a DataTransfer carrier and at least one event path', () => {
+  assert.equal(canStageImageDrop({ hasDataTransfer: true, hasDragEventConstructor: true, hasLegacyDragEvent: false }), true)
+  assert.equal(canStageImageDrop({ hasDataTransfer: true, hasDragEventConstructor: false, hasLegacyDragEvent: true }), true)
+  assert.equal(canStageImageDrop({ hasDataTransfer: false, hasDragEventConstructor: true, hasLegacyDragEvent: true }), false)
+  assert.equal(canStageImageDrop({ hasDataTransfer: true, hasDragEventConstructor: false, hasLegacyDragEvent: false }), false)
 })

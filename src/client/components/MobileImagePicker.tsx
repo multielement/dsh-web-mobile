@@ -1,10 +1,17 @@
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconPaperclipOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { NS } from '../i18n/locales.ts'
-import { stageImagesAsDrop } from '../core/image-intake.ts'
+import { canStageImageDrop, stageImagesAsDrop } from '../core/image-intake.ts'
 
 /** Full props for the composer image-upload entry (session-standard owner share unused). */
 export interface MobileImagePickerProps extends PropsRuntime<'conversation.input.left'>, PropsLocale<typeof NS> {}
+
+/** Engine capability probe, evaluated once at load (client-only module). */
+const INTAKE_SUPPORTED = canStageImageDrop({
+  hasDataTransfer: typeof DataTransfer !== 'undefined',
+  hasDragEventConstructor: typeof DragEvent !== 'undefined',
+  hasLegacyDragEvent: typeof document !== 'undefined' && typeof document.createEvent === 'function',
+})
 
 /** Primary drop-event path: the DragEvent constructor carrying the transfer. */
 function makeDragEvent(type: string, init: { bubbles: boolean, cancelable: boolean, dataTransfer: DataTransfer }): Event | null {
@@ -50,12 +57,15 @@ function makeDataTransfer(): DataTransfer | null {
  * Hidden on wide screens by misc.css.ts (desktop complement block).
  */
 export function MobileImagePicker({ t }: MobileImagePickerProps) {
+  if (!INTAKE_SUPPORTED) return null
   const pickImages = (): void => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'image/*'
     input.multiple = true
-    input.style.display = 'none'
+    // Mount off-screen instead of display:none: some iOS WebKit versions
+    // refuse to open the picker for an unrendered file input.
+    input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0'
     document.body.appendChild(input)
     input.addEventListener('change', () => {
       input.remove()

@@ -12,5 +12,5 @@ export interface MobileImagePickerProps extends PropsRuntime<'conversation.input
  * intake is a silent no-op, exactly like a real drag the host declines.
  * Hidden on wide screens by misc.css.ts (desktop complement block).
  */
-export declare function MobileImagePicker({ t }: MobileImagePickerProps): import("react").JSX.Element;
+export declare function MobileImagePicker({ t }: MobileImagePickerProps): import("react").JSX.Element | null;
 //# sourceMappingURL=MobileImagePicker.d.ts.map
