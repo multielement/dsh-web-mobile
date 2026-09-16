@@ -9,13 +9,14 @@
  * hides a row). A second read-only endpoint feeds the drawer footer's
  * lifetime-token pill (folded by `src/token-usage.ts`).
  *
- * `POST /api/mobile-nav.session.delete` receives `{ sessionId }` and hands
- * the work to `deleteSession()` (see `delete-session.ts`). Services are read
- * at request time through `ctx.get()` so the row fails with a clear error
- * (never crashes) in host shapes that omit them.
- *
- * `GET /api/mobile-nav.tokens.total` folds every billed token across the
- * whole session corpus via `aggregateTokenUsage()` (see `token-usage.ts`).
+ * Both plugin-owned routes bypass the upstream /api prefix chain and its
+ * guards, so each handler runs the host browser auth gate
+ * (`connection.requestRejection`) before anything else and caps the request
+ * body at 4KB — security parity with the DSHA vendored build. The handler
+ * logic (auth gate, method checks, body cap/validation, service-lookup
+ * degrade to structured 503s) lives in the self-contained DI module
+ * `route-guard.ts` and is unit-tested; this file only binds the real cores
+ * and cordis service lookups.
  *
  * The browser half ships via exports["./client"], discovered through the
  * package.json dsh.client declaration. Host packages are intentionally NOT
@@ -36,7 +37,7 @@ export interface HostContext {
         warn(message: string): void;
     };
 }
-/** Context shape inside the `webServer` inject scope. */
+/** Context shape inside the `webServer` + `connection` inject scope. */
 export interface ScopedContext extends HostContext {
     webServer: {
         register(route: {
@@ -44,6 +45,12 @@ export interface ScopedContext extends HostContext {
             path: string;
             handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
         }): unknown;
+    };
+    /** Host browser auth gate: rejects requests not from the app's browser. */
+    connection: {
+        requestRejection(request: {
+            readonly headers: IncomingMessage['headers'];
+        }): 401 | 403 | undefined;
     };
 }
 export declare function apply(ctx: HostContext): void;

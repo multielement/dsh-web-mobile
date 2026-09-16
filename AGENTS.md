@@ -8,17 +8,18 @@
 - No monorepo, no application server, no workspace layer.
 - Real entrypoints:
   - `cordis.patch.yml` inserts the single host plugin row.
-  - `src/index.ts` is the host half: `apply()` makes the row visible to the host Loader, installs transparent gzip/brotli compression for large JSON responses (`src/compress.ts`), and registers two endpoints: `/api/mobile-nav.session.delete` (work in `src/delete-session.ts`) and `/api/mobile-nav.tokens.total` (work in `src/token-usage.ts`, lifetime token fold across the session corpus).
+  - `src/index.ts` is the host half: `apply()` makes the row visible to the host Loader, installs transparent gzip/brotli compression for large JSON responses (`src/compress.ts`), and binds two endpoints: `/api/mobile-nav.session.delete` (work in `src/delete-session.ts`) and `/api/mobile-nav.tokens.total` (work in `src/token-usage.ts`, lifetime token fold across the session corpus). Both handlers live in the self-contained DI module `src/route-guard.ts` and run the host browser auth gate (`connection.requestRejection`) plus a 4KB request-body cap before anything else — security parity with the DSHA vendored build; they register only once both `webServer` and `connection` exist.
   - `package.json` exposes `./client` and declares `dsh.client.platform: "web"`; DSH discovers the browser half from `src/client/index.tsx`.
 - Key layout（注释版仓库树；`(不入库)` = gitignore，外部 clone 不可见）:
 
   ```text
   dsh-web-mobile/
   ├─ src/                    ← 真源码，唯一该手改的地方
-  │  ├─ index.ts             ← 宿主半区入口（apply 装响应压缩 + 会话删除/总消耗端点）
+  │  ├─ index.ts             ← 宿主半区入口（apply 装响应压缩 + 绑定两路由；handler 逻辑在 route-guard.ts）
   │  ├─ compress.ts          ← 进程级 prototype patch
   │  ├─ delete-session.ts    ← 会话删除纯核（DI、分代适配、可单测）
   │  ├─ token-usage.ts       ← 全局 token 折叠纯核（DI、sessionQuery 结构切片、可单测）
+  │  ├─ route-guard.ts       ← 两路由守卫 handler（零相对运行时导入：鉴权门/方法门/4KB 体积门/DI，可单测）
   │  └─ client/
   │     ├─ index.tsx         ← 浏览器半区入口（3 slots）
   │     ├─ debug.ts          ← ?mobile-nav-debug=1 诊断徽章
@@ -38,7 +39,7 @@
   │  ├─ cdp-probe.mjs        ← 主探针 32 断言（EXPECTED_FAILURES 基线）
   │  ├─ cdp-swipe-probe/failures · cdp-zoom-probe · cdp-compat-contracts (.mjs)
   │  └─ probes/              ← 9 个回归锚点（builtin-only，可单跑）
-  ├─ tests/                  ← 14 个 .test.ts（node --test，type-stripping 直跑）
+  ├─ tests/                  ← 15 个 .test.ts（node --test，type-stripping 直跑）
   ├─ docs/
   │  ├─ specs/               ← 6 篇权威设计文档（入库）
   │  ├─ audits/ · maintenance/pitfalls.md · upstream/（runbook + compat-contracts.json）· fork-wzxmt-zhc/
@@ -180,7 +181,7 @@ dsh web
 ## Testing & QA
 
 - **设置/插件市场调试地图**：`docs/debug/settings-market-debug-map.md` —— 设置区与市场 UI 的 DOM 层级图、入口链路、CSS module 哈希对照表（VOzbGW_/eGUBIq_/hHd-Xa_…）、compat 干预点索引与 CDP 取证 SOP。排查该区域布局/弹层问题先读它，不要重新摸索层级。（此文档仅本地保留，已加入 .gitignore 不随仓库上传。）
-- Automated gates: `pnpm verify` (typecheck) and `pnpm test:core`（14 个测试文件，glob 覆盖 `tests/` 全部）. `pnpm build` additionally exercises the custom client bundler. Use `git diff --check` for whitespace hygiene.
+- Automated gates: `pnpm verify` (typecheck) and `pnpm test:core`（15 个测试文件，glob 覆盖 `tests/` 全部）. `pnpm build` additionally exercises the custom client bundler. Use `git diff --check` for whitespace hygiene.
 - There is no linter, formatter, or coverage setup; the CI workflow (`.github/workflows/ci.yml`) additionally runs the lib freshness gate `git diff --exit-code lib`.
 - After source/layout changes, install the linked plugin in a real DSH Web profile, restart `dsh web`, and check both sides of the breakpoint:
   - **Narrow phone (~390px):** rail hidden; drawer/FAB/backdrop open and close; Escape; session-row action menus do not close the drawer; settings remains usable; Files opens explorer/preview sheets; session-log/footer actions work; preview fullscreen opens and resets.

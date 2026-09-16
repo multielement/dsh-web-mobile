@@ -9,13 +9,14 @@
  * hides a row). A second read-only endpoint feeds the drawer footer's
  * lifetime-token pill (folded by `src/token-usage.ts`).
  *
- * `POST /api/mobile-nav.session.delete` receives `{ sessionId }` and hands
- * the work to `deleteSession()` (see `delete-session.ts`). Services are read
- * at request time through `ctx.get()` so the row fails with a clear error
- * (never crashes) in host shapes that omit them.
- *
- * `GET /api/mobile-nav.tokens.total` folds every billed token across the
- * whole session corpus via `aggregateTokenUsage()` (see `token-usage.ts`).
+ * Both plugin-owned routes bypass the upstream /api prefix chain and its
+ * guards, so each handler runs the host browser auth gate
+ * (`connection.requestRejection`) before anything else and caps the request
+ * body at 4KB — security parity with the DSHA vendored build. The handler
+ * logic (auth gate, method checks, body cap/validation, service-lookup
+ * degrade to structured 503s) lives in the self-contained DI module
+ * `route-guard.ts` and is unit-tested; this file only binds the real cores
+ * and cordis service lookups.
  *
  * The browser half ships via exports["./client"], discovered through the
  * package.json dsh.client declaration. Host packages are intentionally NOT
@@ -25,7 +26,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { installResponseCompression } from './compress.js'
 import { deleteSession, type DeleteSessionDeps } from './delete-session.js'
-import { aggregateTokenUsage, type TokenUsageQuery } from './token-usage.js'
+import { aggregateTokenUsage, type TokenUsageDeps } from './token-usage.js'
+import { createDeleteHandler, createTokensHandler } from './route-guard.js'
 
 /** Minimal structural slice of the host cordis Context that apply() needs. */
 export interface HostContext {
@@ -39,7 +41,7 @@ export interface HostContext {
   logger: { warn(message: string): void }
 }
 
-/** Context shape inside the `webServer` inject scope. */
+/** Context shape inside the `webServer` + `connection` inject scope. */
 export interface ScopedContext extends HostContext {
   webServer: {
     register(route: {
@@ -48,32 +50,10 @@ export interface ScopedContext extends HostContext {
       handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
     }): unknown
   }
-}
-
-/** Wire contract of the session-delete endpoint. */
-interface DeleteSessionBody {
-  sessionId?: unknown
-}
-
-/** Drain a request body as UTF-8 text. */
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    req.setEncoding('utf8')
-    req.on('data', (chunk: string) => { data += chunk })
-    req.on('end', () => resolve(data))
-    req.on('error', reject)
-  })
-}
-
-/** Write one JSON response with a fixed content type. */
-function respond(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(payload),
-  })
-  res.end(payload)
+  /** Host browser auth gate: rejects requests not from the app's browser. */
+  connection: {
+    requestRejection(request: { readonly headers: IncomingMessage['headers'] }): 401 | 403 | undefined
+  }
 }
 
 export function apply(ctx: HostContext): void {
@@ -83,57 +63,19 @@ export function apply(ctx: HostContext): void {
   ctx.effect(() => installResponseCompression(), 'dsh-web-mobile: response compression')
 
   // Session-delete route (port of fork wzxmt-zhc v2.7.0). Registers once the
-  // web route registry exists; the persistence / session / agent / workspace
-  // services are read per request so host shapes without them degrade to a
-  // structured 503 instead of a crash.
-  ctx.inject(['webServer'], (webCtx) => {
+  // web route registry AND the connection auth gate exist; the persistence /
+  // session / agent / workspace services are read per request so host shapes
+  // without them degrade to a structured 503 instead of a crash.
+  ctx.inject(['webServer', 'connection'], (webCtx) => {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact',
       path: '/api/mobile-nav.session.delete',
-      handler: async (req, res) => {
-        if (req.method !== 'POST') {
-          respond(res, 405, { error: { code: 'method-not-allowed', message: 'POST required' } })
-          return
-        }
-        let body: DeleteSessionBody
-        try {
-          body = JSON.parse(await readBody(req)) as DeleteSessionBody
-        } catch {
-          respond(res, 400, {
-            error: { code: 'invalid-body', message: 'expected a JSON body of the form { "sessionId": string }' },
-          })
-          return
-        }
-        const { sessionId } = body
-        if (typeof sessionId !== 'string' || sessionId === '') {
-          respond(res, 400, {
-            error: { code: 'invalid-session-id', message: 'sessionId must be a non-empty string' },
-          })
-          return
-        }
-
-        const persistence = ctx.get('sessionPersistence')
-        if (persistence === undefined) {
-          respond(res, 503, {
-            error: { code: 'persistence-unavailable', message: 'session persistence is not configured' },
-          })
-          return
-        }
-        const result = await deleteSession({
-          persistence: persistence as DeleteSessionDeps['persistence'],
-          sessions: ctx.get('sessions') as DeleteSessionDeps['sessions'] | undefined,
-          agents: ctx.get('agents') as DeleteSessionDeps['agents'] | undefined,
-          workspaceRegistry: ctx.get('workspaceRegistry') as DeleteSessionDeps['workspaceRegistry'] | undefined,
-        }, sessionId)
-        if (result.ok) {
-          respond(res, 200, { ok: true, deleted: result.deleted })
-          return
-        }
-        ctx.logger.warn(
-          `dsh-web-mobile: session-delete failed for '${sessionId}' (${result.error.code}): ${result.error.message}`,
-        )
-        respond(res, result.status, { error: result.error })
-      },
+      handler: createDeleteHandler({
+        rejection: (req) => webCtx.connection.requestRejection(req),
+        resolve: (service) => ctx.get(service),
+        deleteSession: (deps, sessionId) => deleteSession(deps as unknown as DeleteSessionDeps, sessionId),
+        logger: ctx.logger,
+      }),
     }), 'dsh-web-mobile: session-delete route')
 
     // Lifetime-token total for the drawer footer pill. The session corpus is
@@ -142,27 +84,11 @@ export function apply(ctx: HostContext): void {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact',
       path: '/api/mobile-nav.tokens.total',
-      handler: async (req, res) => {
-        if (req.method !== 'GET') {
-          respond(res, 405, { error: { code: 'method-not-allowed', message: 'GET required' } })
-          return
-        }
-        const result = await aggregateTokenUsage({
-          sessionQuery: ctx.get('sessionQuery') as TokenUsageQuery | undefined,
-        })
-        if (result.ok) {
-          respond(res, 200, {
-            ok: true,
-            totalTokens: result.totalTokens,
-            sessions: result.sessions,
-            failed: result.failed,
-          })
-          return
-        }
-        respond(res, 503, {
-          error: { code: 'session-query-unavailable', message: 'session corpus is not available' },
-        })
-      },
+      handler: createTokensHandler({
+        rejection: (req) => webCtx.connection.requestRejection(req),
+        resolve: (service) => ctx.get(service),
+        aggregateTokenUsage: (deps) => aggregateTokenUsage(deps as TokenUsageDeps),
+      }),
     }), 'dsh-web-mobile: token-total route')
   })
 }
