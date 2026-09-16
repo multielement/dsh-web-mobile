@@ -927,4 +927,33 @@ export const COMPAT_CSS = `@media (max-width: 1023px) and (pointer: coarse) {
   }
 }
 
+/* ===== 右侧面板（DSH 0.1.5 起，dsh-client-ui-sidebar-right）：手机端全屏覆盖 ===== */
+/* DSHA 补丁移植：0.1.5 的 Files/预览属于右侧面板，在手机上应覆盖会话
+   而不是压缩会话区。面板列改全屏 fixed，只有打开状态才接指针事件；
+   0.1.5 以前的宿主没有这些标记，规则整体空转。 */
+@media (max-width: 1023px) and (pointer: coarse) {
+  [data-mobile-nav="frame"] [data-rightbar-col] {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100% !important;
+    z-index: 35;
+    pointer-events: none;
+  }
+  [data-mobile-nav="frame"] [data-sidebar-right-panel] {
+    width: 100% !important;
+    max-width: 100vw !important;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  [data-sidebar-right-panel][data-sidebar-right-open] {
+    pointer-events: auto;
+  }
+  /* 标签关闭按钮由上游按 20px 居中定位，不能套用普通工具按钮的最小高度。 */
+  [data-sidebar-right-panel] button:not([data-dockkit-tab-close]) {
+    min-height: 32px;
+  }
+}
+
 `

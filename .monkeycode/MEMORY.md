@@ -62,4 +62,6 @@ Entries discovered by the Agent during task execution should follow this format:
   - DSHA（qiannianhuanxiang/DSHA）builtin-plugins 内 vendored 的 dsh-web-mobile 有加固版：插件自建路由跑宿主 requestRejection 鉴权（401|403）、4KB 请求体上限、aborted 处理；本地源码版三样全无——v2.5.2 已在 src/route-guard.ts 实现对齐（不依赖 DSHA 私有文件）
   - route-guard.ts 保持零相对运行时导入（全 DI），否则 node --test type-stripping 无法直测（.js 说明符映射回 .ts 只有 tsc bundler 模式支持）
   - DSHA vendored client.js 与本地 client.js 差异主要是插件安全加固，CSS 以 0.1.2+ 构建对 0.1.5-rc.2 大概率兼容但须实机实测；用户设备装 0.1.5-rc.2 后需验证
+  - DSHA 私有 CSS 补丁已部分合入 v2.5.3：右栏 overlay（compat.css.ts）、toggle top 18px、composer 13px+delta（layout.css.ts）、inject 加 sidebar-right（package.json，peer optional）
+  - DSHA 其余私有项暂未合入（见 AGENTS.md DSHA 0.1.5 适配补丁条目）：预设入口锚点、composer _modes 弹性族、删除确认底部弹层、backdrop 动画、icon-label 折叠族
 

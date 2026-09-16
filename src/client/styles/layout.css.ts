@@ -412,6 +412,26 @@ export const LAYOUT_CSS = `/* ---------- mobile-only layout (narrow viewport AND
     box-sizing: border-box;
   }
 
+  /* --- Composer input font on mobile (DSHA 补丁，13px 基准 + delta) ---
+     The composer text shrinks one notch on phones (13px base); the editor
+     layer, placeholder and the height-measuring layers share one font size
+     so the caret and measurement stay in sync. Merged with the global
+     font-size axis: 13px + --dsh-web-mobile-font-delta keeps the host
+     font-size control scaling the composer (DSHA's hardcoded 13px would
+     ignore it). iOS is excluded — the 16px focus-zoom floor (#45) owns
+     that path. */
+  html:not([data-mobile-nav-ios]) [data-composer-card] {
+    --dsh-content-font-size: calc(13px + var(--dsh-web-mobile-font-delta, 0px));
+  }
+  html:not([data-mobile-nav-ios]) [data-composer-card] [data-composer-input],
+  html:not([data-mobile-nav-ios]) [data-composer-card] [data-composer-placeholder],
+  html:not([data-mobile-nav-ios]) [data-composer-card] textarea,
+  html:not([data-mobile-nav-ios]) [data-composer-card] [data-input-mirror],
+  html:not([data-mobile-nav-ios]) [data-composer-card] [data-input-backdrop] {
+    font-size: calc(13px + var(--dsh-web-mobile-font-delta, 0px)) !important;
+    line-height: 1.5 !important;
+  }
+
   /* --- Fix composer row overflow at narrow widths (320px-360px) ---
      Force every direct child of the tools and trailing lanes to shrink,
      so they can fit within the available space without causing horizontal
@@ -517,11 +537,13 @@ export const LAYOUT_CSS = `/* ---------- mobile-only layout (narrow viewport AND
     min-width: 0;
     gap: 2px;
   }
-  /* The directory toggle stays at the far left of the header. */
+  /* The directory toggle stays at the far left of the header. DSHA 补丁：
+     顶部 18px 与页首控制行中心 32px 对齐（0.1.5 页首更高，见 release
+     「按钮与左侧入口的中心均为 32px」）。 */
   [data-mobile-nav="toggle"] {
     position: absolute !important;
     left: 8px !important;
-    top: 12px !important;
+    top: 18px !important;
     z-index: 2 !important;
   }
   /* Files remains in flow and is ordered as the rightmost plugin action. */
