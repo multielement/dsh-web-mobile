@@ -133,11 +133,6 @@ export function apply(ctx: ClientContext): void {
         }
       })
     }
-    const arm = (): void => {
-      clear()
-      if (mq.matches) apply()
-    }
-    arm()
     // Streaming floods this observer with document-wide childList batches;
     // coalesce to one apply per frame and re-check the breakpoint at flush
     // time so a queued callback never writes mobile styles on desktop.
@@ -148,7 +143,21 @@ export function apply(ctx: ClientContext): void {
     const mo = new MutationObserver(() => {
       if (mq.matches) scheduler.schedule(() => { if (mq.matches) apply() })
     })
-    mo.observe(document.documentElement, { childList: true, subtree: true })
+    // Gate the observer itself on the breakpoint instead of observing the
+    // whole document at every width: a desktop user would otherwise pay the
+    // record-building cost of every streamed mutation for a callback that
+    // immediately returns. attachObserver is idempotent so arm() can call it
+    // on every breakpoint change.
+    const attachObserver = (): void => {
+      mo.disconnect()
+      if (mq.matches) mo.observe(document.documentElement, { childList: true, subtree: true })
+    }
+    const arm = (): void => {
+      attachObserver()
+      clear()
+      if (mq.matches) apply()
+    }
+    arm()
     mq.addEventListener('change', arm)
     return () => {
       scheduler.cancel()

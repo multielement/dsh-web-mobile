@@ -100,7 +100,15 @@ export function createStatsLineTask(): ReconcilerTask {
             (el) => el.children.length === 0 && /^TPS\s+\d/.test((el.textContent ?? '').trim()),
           )
           if (tps !== undefined) {
-            tpsOrigin.parent.insertBefore(tps, tpsOrigin.next)
+            // Same detached-sibling hazard as settings-toolbar-reparent: the
+            // recorded `next` can leave the parent while the parent itself
+            // stays connected (React re-render), and insertBefore would then
+            // throw NotFoundError mid-dispose. Append instead.
+            if (tpsOrigin.next !== null && tpsOrigin.next.parentNode !== tpsOrigin.parent) {
+              tpsOrigin.parent.appendChild(tps)
+            } else {
+              tpsOrigin.parent.insertBefore(tps, tpsOrigin.next)
+            }
             break
           }
         }

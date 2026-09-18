@@ -64,6 +64,17 @@ export type DeleteSessionResult = {
     };
 };
 /**
+ * Whether `target` resolves to a path inside `root` (defense against escapes).
+ *
+ * `path.relative` returns an ABSOLUTE path when the two inputs are on
+ * different volumes (Windows different drives: relative('D:\\a','C:\\b') is
+ * 'C:\\b'). That value is neither '..' nor '../…'-prefixed nor empty, so the
+ * `..` checks alone would classify a foreign-drive target as INSIDE the root
+ * and let `rm -r` run on it. An absolute relative path means "a different
+ * volume", which is outside by definition. Exported for the path-guard tests.
+ */
+export declare function isInside(root: string, target: string): boolean;
+/**
  * Delete one session: stop it if live, remove its persisted directory, and
  * detach it from every workspace account.
  * @param deps - Injected services; the deletion flow never imports the harness.

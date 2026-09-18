@@ -43,6 +43,14 @@ interface DeferredResponse {
   encoding: 'br' | 'gzip'
   /** Buffered body chunks. */
   chunks: Buffer[]
+  /**
+   * Callbacks passed to `write(chunk, encoding, cb)` while the response was
+   * deferred. Node fires them once the chunk is flushed; here nothing is
+   * flushed until `end`, so they are queued and drained after the body is
+   * committed. Dropping them silently breaks callers that await write
+   * completion (backpressure accounting, tests, stream bridges).
+   */
+  writeCallbacks: ((...args: unknown[]) => void)[]
 }
 
 /** Per-response state; only present while a JSON response is being deferred. */
@@ -86,7 +94,60 @@ export function varyWithAcceptEncoding(headers: Record<string, string | number |
   }
 }
 
-/** Buffer one body chunk for a deferred response. */
+/** Extract the trailing callback from an `end`/`write` rest-arg list, if any. */
+function trailingCallback(rest: readonly unknown[]): ((...args: unknown[]) => void) | undefined {
+  for (let i = rest.length - 1; i >= 0; i--) {
+    if (typeof rest[i] === 'function') return rest[i] as (...args: unknown[]) => void
+    // Only a trailing run of callback-compatible args counts; stop at data.
+    break
+  }
+  return undefined
+}
+
+/**
+ * Call the ORIGINAL `end` with at most a data buffer and the trailing
+ * callback. Encoding arguments from the caller's original signature are
+ * dropped: the deferred body has already been buffered/compressed, so any
+ * encoding string in `rest` must never be replayed as a body chunk.
+ */
+function invokeEnd(
+  res: ServerResponse,
+  origEnd: (chunk?: unknown, ...rest: unknown[]) => ServerResponse,
+  data: Buffer | undefined,
+  callback: ((...args: unknown[]) => void) | undefined,
+): ServerResponse {
+  if (data !== undefined) {
+    return callback === undefined
+      ? origEnd.call(res, data)
+      : origEnd.call(res, data, callback)
+  }
+  return callback === undefined ? origEnd.call(res) : origEnd.call(res, callback)
+}
+
+/**
+ * Build the callback that fires once the deferred body is committed: the
+ * queued `write` callbacks first (in call order, mirroring Node flushing each
+ * buffered chunk in turn), then the `end` callback. Returns a thunk so the
+ * call site can decide *when* the body has actually been written.
+ */
+function invokeEndCallback(
+  rest: readonly unknown[],
+  pending: DeferredResponse,
+): () => ((...args: unknown[]) => void) | undefined {
+  const queued = pending.writeCallbacks
+  const endCallback = trailingCallback(rest)
+  return () => {
+    for (const cb of queued) {
+      try {
+        cb()
+      } catch {
+        // A write callback throwing must not break the response teardown;
+        // node surfaces such errors on the stream, not in our patch.
+      }
+    }
+    return endCallback
+  }
+}
 function bufferChunk(pending: DeferredResponse, chunk: unknown): void {
   if (typeof chunk === 'string') pending.chunks.push(Buffer.from(chunk))
   else if (chunk instanceof Uint8Array) pending.chunks.push(Buffer.from(chunk))
@@ -103,10 +164,49 @@ function writeHeadWith(res: ServerResponse, origWriteHead: (...args: unknown[]) 
 }
 
 /**
+ * Snapshot the headers the response already carries via `setHeader` calls,
+ * merged under any headers passed directly to `writeHead` (writeHead wins on
+ * a key clash, matching Node's own precedence).
+ *
+ * Node's `writeHead(status)` with no headers argument is extremely common:
+ * the caller sets headers with `res.setHeader(...)`. The patch previously
+ * read ONLY the writeHead argument, so that path looked like "no headers"
+ * and was passed through uncompressed — silently disabling compression for
+ * every setHeader-style handler. This merge closes that gap.
+ */
+function snapshotHeaders(res: ServerResponse, writeHeadArgs: unknown[]): Record<string, string | number | string[]> {
+  const merged: Record<string, string | number | string[]> = {}
+  const existing = res.getHeaders()
+  for (const key of Object.keys(existing)) {
+    const value = existing[key]
+    if (value !== undefined) merged[key] = value as string | number | string[]
+  }
+  const raw = typeof writeHeadArgs[1] === 'string' ? writeHeadArgs[2] : writeHeadArgs[1]
+  if (raw !== undefined && raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const key of Object.keys(raw as Record<string, unknown>)) {
+      merged[key] = (raw as Record<string, string | number | string[]>)[key]
+    }
+  }
+  return merged
+}
+
+/**
  * Install the compression patch on http.ServerResponse.prototype.
+ *
+ * Idempotent: a second call while a patch is live returns a no-op disposer
+ * instead of wrapping the wrapper. Without the guard, two live installs each
+ * capture the other's patched method as their `orig`, and because each
+ * disposer only restores when the prototype still holds ITS OWN function, a
+ * non-LIFO dispose order leaves the prototype patched forever (verified by
+ * probe: non-LIFO unwinding of a double install never returns to pristine).
+ * The live disposer owns the restore; a repeated install is a no-op.
+ *
  * @returns disposer restoring the original methods (plugin reload safety).
  */
+let activeCompressionDisposer: (() => void) | null = null
+
 export function installResponseCompression(): () => void {
+  if (activeCompressionDisposer !== null) return () => {}
   const proto = NodeServerResponse.prototype
   // Capture the originals under the simple signatures the wrappers use; the
   // real overloaded implementations are restored unchanged on dispose.
@@ -115,9 +215,11 @@ export function installResponseCompression(): () => void {
   const origEnd = proto.end as (chunk?: unknown, ...rest: unknown[]) => ServerResponse
 
   function patchedWriteHead(this: ServerResponse, ...args: unknown[]): ServerResponse {
-    const rawHeaders = typeof args[1] === 'string' ? args[2] : args[1]
-    const headers = rawHeaders as Record<string, string | number | string[]> | undefined
-    if (headers === undefined || !isDeferrable(headers)) {
+    // Headers may arrive as a writeHead argument OR have been set earlier via
+    // res.setHeader(...). Node's writeHead(status) no-header form is common;
+    // read BOTH so a setHeader-only handler is still deferrable.
+    const headers = snapshotHeaders(this, args)
+    if (!isDeferrable(headers)) {
       return origWriteHead.apply(this, args as never) as ServerResponse
     }
     const encoding = pickEncoding(this)
@@ -125,7 +227,10 @@ export function installResponseCompression(): () => void {
       return origWriteHead.apply(this, args as never) as ServerResponse
     }
     // Hold the header write until the body size is known (see module doc).
-    deferred.set(this, { writeHeadArgs: args, headers, encoding, chunks: [] })
+    // Node's own headers have already been merged into the snapshot; the
+    // replay call passes the snapshot back so nothing set via setHeader is
+    // lost when writeHeadArguments omitted it.
+    deferred.set(this, { writeHeadArgs: args, headers, encoding, chunks: [], writeCallbacks: [] })
     return this
   }
 
@@ -133,6 +238,8 @@ export function installResponseCompression(): () => void {
     const pending = deferred.get(this)
     if (pending !== undefined) {
       bufferChunk(pending, chunk)
+      const callback = trailingCallback(rest)
+      if (callback !== undefined) pending.writeCallbacks.push(callback)
       return true
     }
     return origWrite.apply(this, [chunk, ...rest] as never) as boolean
@@ -148,14 +255,17 @@ export function installResponseCompression(): () => void {
     deferred.delete(this)
     if (chunk !== undefined) bufferChunk(pending, chunk)
     const body = Buffer.concat(pending.chunks)
+    // Only the trailing callback survives a deferred end: the body is written
+    // in one shot below, so any encoding argument in `rest` is consumed here.
+    // Passing `rest` through verbatim would push an encoding string ('utf8')
+    // into the stream as a second body chunk and corrupt the response.
+    const callback = invokeEndCallback(rest, pending)
 
     // Small or empty JSON: replay the ORIGINAL header write and body verbatim
     // (no Content-Encoding, original Content-Length intact).
     if (body.byteLength < MIN_JSON_BYTES) {
       writeHeadWith(this, origWriteHead, pending, pending.headers)
-      return body.byteLength === 0
-        ? origEnd.apply(this, rest as never) as ServerResponse
-        : origEnd.apply(this, [body, ...rest] as never) as ServerResponse
+      return invokeEnd(this, origEnd, body.byteLength === 0 ? undefined : body, callback())
     }
 
     // Large JSON: compress and rewrite the length-bearing headers.
@@ -171,16 +281,19 @@ export function installResponseCompression(): () => void {
     varyWithAcceptEncoding(headers)
     writeHeadWith(this, origWriteHead, pending, headers)
     origWrite.call(this, compressed)
-    return origEnd.apply(this, rest as never) as ServerResponse
+    return invokeEnd(this, origEnd, undefined, callback())
   }
 
   proto.writeHead = patchedWriteHead
   proto.write = patchedWrite
   proto.end = patchedEnd
 
-  return () => {
+  const dispose = (): void => {
     if (proto.writeHead === patchedWriteHead) proto.writeHead = origWriteHead
     if (proto.write === patchedWrite) proto.write = origWrite
     if (proto.end === patchedEnd) proto.end = origEnd
+    if (activeCompressionDisposer === dispose) activeCompressionDisposer = null
   }
+  activeCompressionDisposer = dispose
+  return dispose
 }

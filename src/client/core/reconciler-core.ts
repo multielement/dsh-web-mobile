@@ -127,10 +127,13 @@ export function createReconcilerCore(options: ReconcilerCoreOptions): Reconciler
       active.add(task)
       runEnsure(task)
     }
+    // Idempotent disposer: a second invocation (or an invocation after the
+    // core already tore the task down via deactivate()) must be a no-op.
+    // `active.delete` only reports true when the task was actually present,
+    // so the dispose side-effect never runs twice.
     return () => {
       registered.delete(task)
-      if (active !== null) {
-        active.delete(task)
+      if (active !== null && active.delete(task)) {
         runDispose(task)
       }
     }

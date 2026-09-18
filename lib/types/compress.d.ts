@@ -9,9 +9,5 @@ export declare function headerValue(headers: Record<string, string | number | st
 export declare function isDeferrable(headers: Record<string, string | number | string[]>): boolean;
 /** Append the Accept-Encoding Vary token without clobbering an existing Vary. */
 export declare function varyWithAcceptEncoding(headers: Record<string, string | number | string[]>): void;
-/**
- * Install the compression patch on http.ServerResponse.prototype.
- * @returns disposer restoring the original methods (plugin reload safety).
- */
 export declare function installResponseCompression(): () => void;
 //# sourceMappingURL=compress.d.ts.map

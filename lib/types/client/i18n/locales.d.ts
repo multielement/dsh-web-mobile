@@ -8,6 +8,11 @@ export declare const zh: {
     readonly sessionLog: "导出会话日志";
     readonly files: "文件浏览";
     readonly tokensTotal: "总消耗";
+    readonly tokInput: "输入";
+    readonly tokOutput: "输出";
+    readonly tokCacheRead: "缓存读";
+    readonly tokCacheWrite: "缓存写";
+    readonly tokReasoning: "思考";
     readonly uploadImage: "上传图片";
     readonly previewFullscreen: "全屏预览";
     readonly previewExitFullscreen: "退出全屏";

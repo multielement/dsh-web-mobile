@@ -31,11 +31,21 @@ export interface TokenUsageQuery {
 export interface TokenUsageDeps {
     sessionQuery?: TokenUsageQuery;
 }
-/** One settled aggregate. */
+/** One settled aggregate, with the per-bucket breakdown preserved. */
 export interface TokenUsageResult {
     ok: boolean;
     /** Sum of input + output + cache read/write + reasoning tokens across all sessions. */
     totalTokens: number;
+    /** Prompt tokens billed without a cache read. */
+    inputTokens: number;
+    /** Tokens the model generated. */
+    outputTokens: number;
+    /** Prompt tokens served from the prompt cache. */
+    cacheReadTokens: number;
+    /** Prompt tokens written into the prompt cache. */
+    cacheWriteTokens: number;
+    /** Reasoning / thinking tokens. */
+    reasoningTokens: number;
     /** Sessions that contributed at least one usable read. */
     sessions: number;
     /** Sessions whose log could not be read (skipped, not fatal). */

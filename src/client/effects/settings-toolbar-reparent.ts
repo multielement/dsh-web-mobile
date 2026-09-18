@@ -24,7 +24,17 @@ export function createSettingsToolbarTask(): ReconcilerTask {
       if (origin === null) return
       const header = document.querySelector('[aria-modal="true"] [class*="_header"]:not([class*="_headerActions"])')
       if (header !== null && origin.parent.isConnected) {
-        origin.parent.insertBefore(header, origin.next)
+        // `insertBefore` throws NotFoundError when the reference node is no
+        // longer a child of the parent. React can rebuild the dialog between
+        // the ensure that recorded `origin.next` and this dispose, leaving a
+        // detached sibling behind while the parent itself stays connected.
+        // Fall back to appendChild in that case so disposal never aborts the
+        // reconciler teardown with an exception.
+        if (origin.next !== null && origin.next.parentNode !== origin.parent) {
+          origin.parent.appendChild(header)
+        } else {
+          origin.parent.insertBefore(header, origin.next)
+        }
       }
       origin = null
     },

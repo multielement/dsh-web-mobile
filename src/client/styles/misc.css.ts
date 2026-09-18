@@ -78,6 +78,16 @@ export const MISC_CSS = `@media (max-width: 1023px) and (pointer: coarse) {
     justify-content: center !important;
     color: inherit !important;
     background: transparent !important;
+    /* Horizontal nudge: the lane's leading gap leaves the paperclip a touch
+       right of the host chip's visual center, so the glyph reads off-center.
+       Pull it left; --dsh-web-mobile-image-picker-shift is the single knob
+       (negative = left). Set to 0 to fall back to the raw host gap. */
+    margin-left: var(--dsh-web-mobile-image-picker-shift, -3px) !important;
+  }
+  /* Collapse the lane's own gap before the picker so the nudge is not eaten
+     twice (the host sets the row gap; the picker is its first item there). */
+  [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) > :first-child > [data-mobile-nav="image-picker"] {
+    margin-left: var(--dsh-web-mobile-image-picker-shift, -3px) !important;
   }
   [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) [data-mobile-nav="image-picker"]:active {
     background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)) !important;

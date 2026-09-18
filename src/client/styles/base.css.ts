@@ -42,11 +42,28 @@ body {
 
 /* Drawer footer actions: the relocated total-token counter plus the Session
    log download and the Files action that opens the dsh-web-ui explorer
-   sheet. Tokens-total sits leftmost (rendered first in the component). */
+   sheet. The row wraps so Files + Session log share the first line and the
+   total-token pill spans the second line with its breakdown beneath. */
 [data-mobile-nav="drawer-actions"] {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
   gap: 8px;
+}
+[data-mobile-nav="drawer-actions"] > button[data-mobile-nav="explorer"],
+[data-mobile-nav="drawer-actions"] > button[data-mobile-nav="session-log"] {
+  flex: 1 1 0;
+  min-width: 0;
+}
+[data-mobile-nav="drawer-actions"] > button[data-mobile-nav="tokens-total"] {
+  flex: 1 1 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 34px;
+  padding: 6px 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
 }
 [data-mobile-nav="tokens-total"],
 [data-mobile-nav="session-log"],
@@ -75,6 +92,31 @@ body {
 [data-mobile-nav="session-log"]:disabled {
   color: var(--dsw-alias-label-dimmed, rgba(0, 0, 0, .35));
   cursor: default;
+}
+/* Total-token pill: first line = icon + label + lifetime figure, second line
+   = the per-bucket breakdown in a smaller tertiary tone. */
+[data-mobile-nav="tokens-total"] .tokens-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+[data-mobile-nav="tokens-total"] .tokens-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+[data-mobile-nav="tokens-total"] .tokens-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 10px;
+  font-size: calc(11px + var(--dsh-web-mobile-font-delta, 0px));
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, rgba(0, 0, 0, .5));
+}
+[data-mobile-nav="tokens-total"] .tokens-breakdown > span {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Session-delete confirm / error cards (shown as a bottom overlay, see the

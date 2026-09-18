@@ -90,6 +90,11 @@ export interface DeleteSessionCall {
 export interface TokenTotalResult {
   ok: boolean
   totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
   sessions: number
   failed: number
 }
@@ -215,6 +220,11 @@ export function createTokensHandler(deps: RouteDeps): RouteHandler {
       respondJson(res, 200, {
         ok: true,
         totalTokens: result.totalTokens,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        cacheWriteTokens: result.cacheWriteTokens,
+        reasoningTokens: result.reasoningTokens,
         sessions: result.sessions,
         failed: result.failed,
       })

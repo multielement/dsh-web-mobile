@@ -16,17 +16,12 @@ export interface MobileDrawerFooterProps extends PropsRuntime<'sidebar.footer.ac
 /**
  * Mobile-only drawer footer actions, relocated from the session header to the
  * drawer footer (beside Settings):
- * - Total tokens (leftmost): lifetime consumption across ALL sessions of the
- *   corpus, folded by the host half's `/api/mobile-nav.tokens.total` endpoint.
- *   Refreshes on tap. Loads only while the mobile query matches, so desktop
- *   never pays the corpus scan.
- * - Files: opens the Files surface as a floating bottom sheet. Prefers the
- *   host-native right panel (0.1.5 sidebarRight service); on older hosts it
- *   falls back to the dsh-web-ui aionui explorer marker (the explorer column
- *   is hidden on mobile until that marker is set, so the suite's own
- *   persisted-expanded state can never cover the UI on load).
- * - Session log: the official session-log-export controller, so the
- *   progress/result dialog is shared with the desktop flow.
+ * - Files + Session log sit on the FIRST row (each half-width).
+ * - Total tokens spans the SECOND row, with the per-bucket breakdown
+ *   (input / output / cache read / cache write / reasoning) rendered under the
+ *   lifetime figure. Folded by the host half's `/api/mobile-nav.tokens.total`
+ *   endpoint. Refreshes on tap. Loads only while the mobile query matches, so
+ *   desktop never pays the corpus scan.
  * Hidden entirely on wide screens (CSS media query).
  */
 export declare function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSidebar, openHostFiles, t }: MobileDrawerFooterProps): import("react").JSX.Element;

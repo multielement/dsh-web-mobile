@@ -10,8 +10,17 @@ export function installDebugBadge(ctx: ClientContext): void {
   ctx.effect(() => {
     if (!new URLSearchParams(location.search).has('mobile-nav-debug')) return () => {}
     const errors: string[] = []
-    const onError = (event: ErrorEvent) => errors.push(`ERR ${event.message.slice(0, 120)}`)
-    const onRejection = (event: PromiseRejectionEvent) => errors.push(`REJ ${String(event.reason).slice(0, 120)}`)
+    // Bounded ring: only the last few entries are ever displayed, but an
+    // unbounded array would keep growing for as long as the debug badge stays
+    // open on a misbehaving page (a render loop can push thousands of
+    // unhandledrejection entries a minute).
+    const ERROR_HISTORY_LIMIT = 20
+    const pushError = (line: string): void => {
+      errors.push(line)
+      if (errors.length > ERROR_HISTORY_LIMIT) errors.shift()
+    }
+    const onError = (event: ErrorEvent) => pushError(`ERR ${event.message.slice(0, 120)}`)
+    const onRejection = (event: PromiseRejectionEvent) => pushError(`REJ ${String(event.reason).slice(0, 120)}`)
     window.addEventListener('error', onError)
     window.addEventListener('unhandledrejection', onRejection)
 

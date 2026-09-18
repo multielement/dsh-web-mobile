@@ -43,7 +43,7 @@
  * removed; they only become unreachable garbage once no log references them.
  */
 import { rm } from 'node:fs/promises'
-import { join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /** How long to wait for a live agent to converge to idle before refusing. */
 const IDLE_TIMEOUT_MS = 20_000
@@ -129,10 +129,20 @@ function sessionDir(root: string, cwd: string | undefined, id: string): string {
   return join(root, project, encodeSegment(id))
 }
 
-/** Whether `target` resolves to a path inside `root` (defense against escapes). */
-function isInside(root: string, target: string): boolean {
+/**
+ * Whether `target` resolves to a path inside `root` (defense against escapes).
+ *
+ * `path.relative` returns an ABSOLUTE path when the two inputs are on
+ * different volumes (Windows different drives: relative('D:\\a','C:\\b') is
+ * 'C:\\b'). That value is neither '..' nor '../…'-prefixed nor empty, so the
+ * `..` checks alone would classify a foreign-drive target as INSIDE the root
+ * and let `rm -r` run on it. An absolute relative path means "a different
+ * volume", which is outside by definition. Exported for the path-guard tests.
+ */
+export function isInside(root: string, target: string): boolean {
   const rel = relative(root, target)
-  return rel !== '..' && !rel.startsWith('..' + sep) && rel !== ''
+  if (rel === '' || rel === '..' || rel.startsWith('..' + sep)) return false
+  return !isAbsolute(rel)
 }
 
 /** Bound a promise with a rejection deadline so a stuck agent never hangs the endpoint. */

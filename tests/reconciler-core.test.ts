@@ -205,6 +205,33 @@ test('flush semantics: empty dirty runs nothing; activation forces all; deactiva
   assert.equal(x.disposes, 1)
 })
 
+test('disposer idempotency: removing a task twice disposes it exactly once', () => {
+  const { core } = makeHarness()
+  const a = makeTask('a')
+  const remove = core.register(a)
+  core.activate()
+  assert.equal(a.ensures, 1)
+
+  remove()
+  assert.equal(a.disposes, 1)
+  remove()
+  assert.equal(a.disposes, 1, 'second remove must not dispose again')
+  assert.equal(core.size, 0)
+})
+
+test('disposer after deactivate: a stale removal must not double-dispose', () => {
+  const { core } = makeHarness()
+  const a = makeTask('a')
+  const remove = core.register(a)
+  core.activate()
+  core.deactivate()
+  assert.equal(a.disposes, 1)
+
+  remove()
+  assert.equal(a.disposes, 1, 'removal after the core already disposed must be a no-op')
+  assert.equal(core.size, 0, 'removal still unregisters the task')
+})
+
 test('preview-close-sync: own open marker must not be treated as a suite close', () => {
   const frameAttrs = new Set(['data-aionui-preview-open'])
   const frame = {

@@ -5,11 +5,14 @@ export interface MobileImagePickerProps extends PropsRuntime<'conversation.input
 }
 /**
  * Mobile-only paperclip button in the composer's left tool lane
- * (`conversation.input.left`): opens the system image picker, then stages the
- * picked files as one synthetic document drop so the host's native attachment
- * pipeline takes over (thumbnail drafts, upload, inline message images, model
- * vision content). The button itself carries no state — a rejected or empty
- * intake is a silent no-op, exactly like a real drag the host declines.
+ * (`conversation.input.left`).
+ *
+ * Flow: mount our own picker (accept=image/*, so the gallery can hand back any
+ * format), normalize every pick into a host-accepted image (sniff MIME,
+ * downscale past the 8192px/64MP ceilings, re-encode below 20MB), then either
+ * inject the results into the host's own hidden file input (preferred: the
+ * host runs its native thumbnail/upload/vision pipeline) or fall back to a
+ * synthetic document drop for host generations without that input.
  * Hidden on wide screens by misc.css.ts (desktop complement block).
  */
 export declare function MobileImagePicker({ t }: MobileImagePickerProps): import("react").JSX.Element | null;

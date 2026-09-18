@@ -28,6 +28,24 @@
 const consumed = new Map<EventTarget, number>()
 
 /**
+ * Upper bound on live marks before a full expiry sweep runs. Lazy cleanup
+ * alone cannot bound this map: a marked element that React removes from the
+ * tree never appears in another event's target chain, so its entry is never
+ * visited and never deleted. A stroke marks every ancestor (10+ on a deep
+ * row), so a long session of swipes over re-rendered rows would grow the map
+ * without limit. Sweeping on the write path (markGestureConsumed, a low-rate
+ * operation) keeps the read path allocation-free while bounding the map.
+ */
+const MAX_CONSUMED_ENTRIES = 256
+
+/** Drop every mark whose window has closed. */
+function sweepExpired(now: number): void {
+  for (const [target, until] of consumed) {
+    if (until <= now) consumed.delete(target)
+  }
+}
+
+/**
  * True while the live stroke is axis-locked horizontal. Unlike the consume
  * marks (written at the gesture layer's OWN pointerup, after
  * classification), this flag is written at tryLock time — during
@@ -81,6 +99,9 @@ export function markGestureConsumed(
   upTo?: Element | null,
 ): void {
   const until = performance.now() + windowMs
+  // Bound the map on the write path: lazy cleanup cannot reach marks whose
+  // elements were detached before their window closed.
+  if (consumed.size >= MAX_CONSUMED_ENTRIES) sweepExpired(performance.now())
   if (!isElementLike(target)) {
     consumed.set(target, until)
     return

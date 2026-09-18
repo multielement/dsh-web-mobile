@@ -8,12 +8,26 @@ import { getFrame, MOBILE_QUERY } from '../effects/phone-chrome.ts'
 interface TokensTotalBody {
   ok?: boolean
   totalTokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  reasoningTokens?: number
+}
+
+/** Per-bucket breakdown carried alongside the lifetime total. */
+interface TokensBreakdown {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  reasoning: number
 }
 
 /** Display state of the lifetime-token counter. */
 type TokensState =
   | { status: 'loading' }
-  | { status: 'loaded'; total: number }
+  | { status: 'loaded'; total: number; breakdown: TokensBreakdown }
   | { status: 'failed' }
 
 /** Full props for the sidebar footer action entry. */
@@ -37,21 +51,20 @@ function formatCompact(total: number): string {
 function formatFull(total: number): string {
   return new Intl.NumberFormat(undefined).format(total)
 }
+/** Guard a wire field into a finite non-negative number (missing -> 0). */
+function numOr(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
+}
 
 /**
  * Mobile-only drawer footer actions, relocated from the session header to the
  * drawer footer (beside Settings):
- * - Total tokens (leftmost): lifetime consumption across ALL sessions of the
- *   corpus, folded by the host half's `/api/mobile-nav.tokens.total` endpoint.
- *   Refreshes on tap. Loads only while the mobile query matches, so desktop
- *   never pays the corpus scan.
- * - Files: opens the Files surface as a floating bottom sheet. Prefers the
- *   host-native right panel (0.1.5 sidebarRight service); on older hosts it
- *   falls back to the dsh-web-ui aionui explorer marker (the explorer column
- *   is hidden on mobile until that marker is set, so the suite's own
- *   persisted-expanded state can never cover the UI on load).
- * - Session log: the official session-log-export controller, so the
- *   progress/result dialog is shared with the desktop flow.
+ * - Files + Session log sit on the FIRST row (each half-width).
+ * - Total tokens spans the SECOND row, with the per-bucket breakdown
+ *   (input / output / cache read / cache write / reasoning) rendered under the
+ *   lifetime figure. Folded by the host half's `/api/mobile-nav.tokens.total`
+ *   endpoint. Refreshes on tap. Loads only while the mobile query matches, so
+ *   desktop never pays the corpus scan.
  * Hidden entirely on wide screens (CSS media query).
  */
 export function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSidebar, openHostFiles, t }: MobileDrawerFooterProps) {
@@ -65,11 +78,21 @@ export function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSide
         return res.json() as Promise<TokensTotalBody>
       })
       .then((body) => {
-        setTokens(
-          body.ok && typeof body.totalTokens === 'number'
-            ? { status: 'loaded', total: body.totalTokens }
-            : { status: 'failed' },
-        )
+        if (body.ok === true && typeof body.totalTokens === 'number') {
+          setTokens({
+            status: 'loaded',
+            total: body.totalTokens,
+            breakdown: {
+              input: numOr(body.inputTokens),
+              output: numOr(body.outputTokens),
+              cacheRead: numOr(body.cacheReadTokens),
+              cacheWrite: numOr(body.cacheWriteTokens),
+              reasoning: numOr(body.reasoningTokens),
+            },
+          })
+        } else {
+          setTokens({ status: 'failed' })
+        }
       })
       .catch(() => setTokens({ status: 'failed' }))
   }, [])
@@ -110,17 +133,6 @@ export function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSide
     <div data-mobile-nav="drawer-actions">
       <button
         type="button"
-        data-mobile-nav="tokens-total"
-        aria-label={tokensTitle}
-        title={tokensTitle}
-        onClick={refreshTokens}
-      >
-        <IconSparkle16 size={14} />
-        <span>{t('tokensTotal')}</span>
-        <span>{tokensDisplay}</span>
-      </button>
-      <button
-        type="button"
         data-mobile-nav="explorer"
         aria-label={t('files')}
         title={t('files')}
@@ -141,6 +153,30 @@ export function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSide
       >
         <IconDownloadOutline16 size={14} />
         <span>{t('sessionLog')}</span>
+      </button>
+      <button
+        type="button"
+        data-mobile-nav="tokens-total"
+        aria-label={tokensTitle}
+        title={tokensTitle}
+        onClick={refreshTokens}
+      >
+        <span className="tokens-main">
+          <IconSparkle16 size={14} />
+          <span>{t('tokensTotal')}</span>
+          <span className="tokens-value">{tokensDisplay}</span>
+        </span>
+        {tokens.status === 'loaded' && (
+          <span className="tokens-breakdown">
+            <span>{`${t('tokInput')} ${formatCompact(tokens.breakdown.input)}`}</span>
+            <span>{`${t('tokOutput')} ${formatCompact(tokens.breakdown.output)}`}</span>
+            <span>{`${t('tokCacheRead')} ${formatCompact(tokens.breakdown.cacheRead)}`}</span>
+            <span>{`${t('tokCacheWrite')} ${formatCompact(tokens.breakdown.cacheWrite)}`}</span>
+            {tokens.breakdown.reasoning > 0 && (
+              <span>{`${t('tokReasoning')} ${formatCompact(tokens.breakdown.reasoning)}`}</span>
+            )}
+          </span>
+        )}
       </button>
     </div>
   )

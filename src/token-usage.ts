@@ -39,11 +39,21 @@ export interface TokenUsageDeps {
   sessionQuery?: TokenUsageQuery
 }
 
-/** One settled aggregate. */
+/** One settled aggregate, with the per-bucket breakdown preserved. */
 export interface TokenUsageResult {
   ok: boolean
   /** Sum of input + output + cache read/write + reasoning tokens across all sessions. */
   totalTokens: number
+  /** Prompt tokens billed without a cache read. */
+  inputTokens: number
+  /** Tokens the model generated. */
+  outputTokens: number
+  /** Prompt tokens served from the prompt cache. */
+  cacheReadTokens: number
+  /** Prompt tokens written into the prompt cache. */
+  cacheWriteTokens: number
+  /** Reasoning / thinking tokens. */
+  reasoningTokens: number
   /** Sessions that contributed at least one usable read. */
   sessions: number
   /** Sessions whose log could not be read (skipped, not fatal). */
@@ -55,8 +65,26 @@ function yieldTurn(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+/**
+ * Sessions folded between event-loop yields. Yielding every read is a
+ * `setTimeout(0)` per session — on a corpus of thousands that alone costs
+ * tens of milliseconds of scheduler churn. Batching keeps the server
+ * responsive (each batch is a bounded chunk of work) without paying a timer
+ * per record.
+ */
+const YIELD_EVERY = 8
+
+/** Running per-bucket accumulator shared by every folded session. */
+interface UsageTotals {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  reasoning: number
+}
+
 /** Fold one raw session snapshot into the running total. Returns true when a usable read landed. */
-function foldSnapshot(snapshot: unknown, totals: { tokens: number; sessions: number }): boolean {
+function foldSnapshot(snapshot: unknown, totals: UsageTotals): boolean {
   const events = (snapshot as { events?: unknown })?.events
   if (!Array.isArray(events)) return false
   for (const event of events) {
@@ -67,13 +95,12 @@ function foldSnapshot(snapshot: unknown, totals: { tokens: number; sessions: num
     const usage = (record.data as { usage?: unknown }).usage
     if (typeof usage !== 'object' || usage === null) continue
     const fields = usage as Record<string, unknown>
-    totals.tokens += num(fields.inputTokens)
-    totals.tokens += num(fields.outputTokens)
-    totals.tokens += num(fields.cacheReadTokens)
-    totals.tokens += num(fields.cacheWriteTokens)
-    totals.tokens += num(fields.reasoningTokens)
+    totals.input += num(fields.inputTokens)
+    totals.output += num(fields.outputTokens)
+    totals.cacheRead += num(fields.cacheReadTokens)
+    totals.cacheWrite += num(fields.cacheWriteTokens)
+    totals.reasoning += num(fields.reasoningTokens)
   }
-  totals.sessions += 1
   return true
 }
 
@@ -84,18 +111,20 @@ function foldSnapshot(snapshot: unknown, totals: { tokens: number; sessions: num
  */
 export async function aggregateTokenUsage(deps: TokenUsageDeps): Promise<TokenUsageResult> {
   if (deps.sessionQuery === undefined) {
-    return { ok: false, totalTokens: 0, sessions: 0, failed: 0 }
+    return { ok: false, totalTokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, sessions: 0, failed: 0 }
   }
 
   let records: unknown[]
   try {
     records = await deps.sessionQuery.listSessions()
   } catch {
-    return { ok: false, totalTokens: 0, sessions: 0, failed: 0 }
+    return { ok: false, totalTokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, sessions: 0, failed: 0 }
   }
 
-  const totals = { tokens: 0, sessions: 0 }
+  const totals: UsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }
+  let sessions = 0
   let failed = 0
+  let sinceYield = 0
   for (const record of records) {
     if (typeof record !== 'object' || record === null) {
       failed += 1
@@ -109,11 +138,25 @@ export async function aggregateTokenUsage(deps: TokenUsageDeps): Promise<TokenUs
     }
     try {
       const snapshot = await deps.sessionQuery.readSession(id)
-      foldSnapshot(snapshot, totals)
+      if (foldSnapshot(snapshot, totals)) sessions += 1
     } catch {
       failed += 1
     }
-    await yieldTurn()
+    if (++sinceYield >= YIELD_EVERY) {
+      sinceYield = 0
+      await yieldTurn()
+    }
   }
-  return { ok: true, totalTokens: totals.tokens, sessions: totals.sessions, failed }
+  const totalTokens = totals.input + totals.output + totals.cacheRead + totals.cacheWrite + totals.reasoning
+  return {
+    ok: true,
+    totalTokens,
+    inputTokens: totals.input,
+    outputTokens: totals.output,
+    cacheReadTokens: totals.cacheRead,
+    cacheWriteTokens: totals.cacheWrite,
+    reasoningTokens: totals.reasoning,
+    sessions,
+    failed,
+  }
 }
