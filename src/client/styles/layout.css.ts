@@ -598,6 +598,41 @@ export const LAYOUT_CSS = `/* ---------- mobile-only layout (narrow viewport AND
     top: 50% !important;
     transform: translateY(-50%) !important;
   }
+  /* --- DSHA 预设入口锚点（DSHA 宿主注入 .dsha-preset-header-anchor） ---
+     预设标签回到右侧位置，新增的菜单容器也参与收缩；非 DSHA 宿主没有该
+     class，规则整体空转。字号沿用全局字号轴（12px 基准 + delta）。 */
+  [data-mobile-nav="frame"] [data-phase] header .dsha-preset-header-anchor {
+    order: 1;
+    width: max-content;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(44vw, 220px);
+    margin-left: auto;
+  }
+  [data-mobile-nav="frame"] [data-phase] header .dsha-preset-header-anchor [data-dsha-agent-preset="header"] {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    max-width: 100%;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 6px;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: calc(12px + var(--dsh-web-mobile-font-delta, 0px));
+  }
+  [data-mobile-nav="frame"] [data-phase] header .dsha-preset-header-anchor [data-dsha-agent-preset="header"] > svg {
+    position: static !important;
+    transform: none !important;
+    flex: 0 0 auto;
+  }
+  [data-mobile-nav="frame"] [data-phase] header .dsha-preset-header-anchor [data-dsha-agent-preset="header"] > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   /* Running/subagent controls keep their full status text and hit area; they
      do not give up width to the mode label. NOTE: the real subagent lineage
      root has class="ZKlsPq_root " — a TRAILING SPACE from the plugin's
@@ -723,8 +758,10 @@ export const LAYOUT_CSS = `/* ---------- mobile-only layout (narrow viewport AND
 
   /* --- Header popovers on mobile (dsh-client-ui-jobs / dsh-client-ui-subagent) --- */
   /* The official entries sit in the session header actions. Their popovers
-     are anchored to the trigger's left edge, so clamp them to the viewport. */
-  [data-mobile-nav="frame"] [data-phase] header [class*="_menu"] {
+     are anchored to the trigger's left edge, so clamp them to the viewport.
+     DSHA 补丁：排除 [class*="_menuAnchor"]（锚点容器，不参与弹层定位），
+     子串 "_menu" 会命中它。 */
+  [data-mobile-nav="frame"] [data-phase] header [class*="_menu"]:not([class*="_menuAnchor"]) {
     left: 8px !important;
     right: auto !important;
     width: min(336px, calc(100vw - 16px));

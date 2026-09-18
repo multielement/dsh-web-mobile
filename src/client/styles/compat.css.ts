@@ -956,4 +956,22 @@ export const COMPAT_CSS = `@media (max-width: 1023px) and (pointer: coarse) {
   }
 }
 
+/* ===== DSHA 预设入口锚点：宽屏触控（≥1024px + 触摸）右侧对齐 ===== */
+/* DSHA 宿主在页首注入 .dsha-preset-header-anchor；宽屏触控下预设入口靠右、
+   与页首控件同排。鼠标桌面与无该 class 的宿主不受影响。DSHA 原补丁在此
+   还让文件入口保持可见，本仓库宽屏触控保持桌面布局（仅会话删除三件套
+   豁免，v2.4.1 决定），故不并入该条。 */
+@media (min-width: 1024px) and (pointer: coarse) {
+  [data-phase] header [class*="_headerActions"] {
+    margin-inline-start: auto;
+    gap: 4px;
+  }
+  [data-phase] header .dsha-preset-header-anchor {
+    order: 90;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 220px;
+  }
+}
+
 `
