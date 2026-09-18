@@ -1,67 +1,34 @@
+import { useEffect, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconPaperclipOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { NS } from '../i18n/locales.ts'
-import { canStageImageDrop, stageImagesAsDrop } from '../core/image-intake.ts'
 import { normalizeImage, type DecodedImage, type NormalizeDeps } from '../core/image-normalize.ts'
 
-/** Full props for the composer image-upload entry (session-standard owner share unused). */
+/** Full props for the composer image-entry companion (session-standard owner share unused). */
 export interface MobileImagePickerProps extends PropsRuntime<'conversation.input.left'>, PropsLocale<typeof NS> {}
 
-/** Engine capability probe, evaluated once at load (client-only module). */
-const INTAKE_SUPPORTED = canStageImageDrop({
-  hasDataTransfer: typeof DataTransfer !== 'undefined',
-  hasDragEventConstructor: typeof DragEvent !== 'undefined',
-  hasLegacyDragEvent: typeof document !== 'undefined' && typeof document.createEvent === 'function',
-})
-
-/** Marks the throwaway input this component mounts, so host-input discovery never picks it. */
-const OWN_INPUT_FLAG = 'mobileOwnInput'
-
-/** Primary drop-event path: the DragEvent constructor carrying the transfer. */
-function makeDragEvent(type: string, init: { bubbles: boolean, cancelable: boolean, dataTransfer: DataTransfer }): Event | null {
-  try {
-    return new DragEvent(type, init)
-  } catch {
-    return null
-  }
-}
-
-/** Legacy initDragEvent surface (removed from lib.dom's DragEvent typing). */
-interface LegacyDragEvent extends Event {
-  initDragEvent(type: string, canBubble: boolean, cancelable: boolean, view: Window | null, detail: number, screenX: number, screenY: number, clientX: number, clientY: number, ctrlKey: boolean, altKey: boolean, shiftKey: boolean, metaKey: boolean, button: number, relatedTarget: EventTarget | null, dataTransfer: DataTransfer | null): void
-}
-
-/** Legacy drop-event path: createEvent + initDragEvent for engines without the constructor. */
-function makeLegacyDropEvent(transfer: DataTransfer): Event | null {
-  try {
-    const event = document.createEvent('DragEvent') as unknown as LegacyDragEvent
-    event.initDragEvent('drop', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null, transfer)
-    return event
-  } catch {
-    return null
-  }
-}
-
-/** DataTransfer carrier for the synthetic drop. */
-function makeDataTransfer(): DataTransfer | null {
-  try {
-    return new DataTransfer()
-  } catch {
-    return null
-  }
-}
-
 /**
- * Locate the host composer's own hidden `<input type="file">` (0.1.5 InputBar
- * ships one with `multiple`, wired to `onPickFiles` -> `intakeFiles`). Driving
- * it directly runs the host's native pick + upload pipeline with zero synthetic
- * events, which is the only path that survives across host generations. The
- * throwaway input this component mounts carries OWN_INPUT_FLAG and is skipped.
+ * Host 0.1.5 already renders its own paperclip button plus a hidden
+ * `<input type="file" multiple>` wired to `intakeFiles`. That button is the
+ * "original upload" affordance users see in the round `_add` chip — so this
+ * plugin must NOT add a second one. Instead it intercepts that input's `change`
+ * in the capture phase, normalizes the picked files into the host's four
+ * admitted image types (see core/image-normalize.ts), writes them back, and
+ * re-dispatches `change` so the host's own `onPickFiles` runs against the
+ * normalized batch. Hosts without such an input fall back to rendering the
+ * plugin's own button (the pre-0.1.5 behavior).
  */
-function findHostFileInput(): HTMLInputElement | null {
-  const scope = document.querySelector<HTMLElement>('[data-slot="conversation.input"]')
-    ?? document.querySelector<HTMLElement>('[class*="_card"]:has(textarea, [data-composer-input])')
-    ?? document
+
+/** Marks the throwaway input this component may mount, so host discovery skips it. */
+const OWN_INPUT_FLAG = 'mobileOwnInput'
+/** Marks a second-pass change so the interceptor does not loop on its own re-dispatch. */
+const NORMALIZED_FLAG = 'mobileNormalized'
+
+/** Locate the host composer's own hidden file input (skips ours). */
+function findHostFileInput(root: ParentNode = document): HTMLInputElement | null {
+  const scope = root.querySelector<HTMLElement>('[data-slot="conversation.input"]')
+    ?? root.querySelector<HTMLElement>('[class*="_card"]:has(textarea, [data-composer-input])')
+    ?? root
   const inputs = scope.querySelectorAll<HTMLInputElement>('input[type="file"]')
   for (const input of inputs) {
     if (input.dataset[OWN_INPUT_FLAG] === '1') continue
@@ -70,33 +37,10 @@ function findHostFileInput(): HTMLInputElement | null {
   return null
 }
 
-/**
- * Hand the prepared files to the host's own file input: write a DataTransfer
- * into its `files` slot and fire `change`, so the host's `onPickFiles` runs
- * against our normalized files exactly as if the user had picked them. This is
- * what makes HEIC / `image/jpg` / oversized photos survive the host's
- * four-type admission gate (see core/image-normalize.ts).
- * @param input - the host composer's file input.
- * @param files - normalized files to inject.
- * @returns true when the transfer landed (availability permitting).
- */
-function feedHostInput(input: HTMLInputElement, files: readonly File[]): boolean {
-  try {
-    const transfer = new DataTransfer()
-    for (const file of files) transfer.items.add(file)
-    input.files = transfer.files
-    input.dispatchEvent(new Event('change', { bubbles: true }))
-    return true
-  } catch {
-    return false
-  }
-}
-
 /** Read the leading bytes of a file for container sniffing. */
 async function readHead(file: File, count: number): Promise<Uint8Array> {
   const slice = file.slice(0, count)
   if (typeof slice.arrayBuffer === 'function') return new Uint8Array(await slice.arrayBuffer())
-  // Very old engines: FileReader is the only reader available.
   return await new Promise<Uint8Array>((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(reader.error ?? new Error('read failed'))
@@ -105,29 +49,25 @@ async function readHead(file: File, count: number): Promise<Uint8Array> {
   })
 }
 
-/** Browser decode via createImageBitmap (WebView support is broad on Android). */
+/** Browser decode via createImageBitmap. */
 async function decodeImage(file: File): Promise<DecodedImage> {
   if (typeof createImageBitmap !== 'function') throw new Error('createImageBitmap unavailable')
   const bitmap = await createImageBitmap(file)
   return {
     width: bitmap.width,
     height: bitmap.height,
-    // ImageBitmap does not expose an alpha flag; treat as opaque so photos take
-    // the JPEG path (the overwhelmingly common case for camera/gallery picks).
     hasAlpha: false,
     draw: (ctx, width, height) => { ctx.drawImage(bitmap, 0, 0, width, height) },
     close: () => { bitmap.close() },
   }
 }
 
-/** Canvas encode via toBlob (resolves null when the codec is unsupported). */
+/** Canvas encode via toBlob. */
 function encodeCanvas(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), type, quality)
-  })
+  return new Promise((resolve) => { canvas.toBlob((blob) => resolve(blob), type, quality) })
 }
 
-/** Browser capabilities injected into the normalizer (kept out of core for testability). */
+/** Browser capabilities injected into the normalizer. */
 const NORMALIZE_DEPS: NormalizeDeps = {
   readHead,
   decode: decodeImage,
@@ -135,30 +75,115 @@ const NORMALIZE_DEPS: NormalizeDeps = {
   encodeBlob: encodeCanvas,
 }
 
+/** Normalize a batch, each failure degrading to its original file. */
+async function normalizeBatch(files: readonly File[]): Promise<File[]> {
+  return Promise.all(files.map(async (file) => {
+    try {
+      const result = await normalizeImage(file, NORMALIZE_DEPS)
+      return result.file
+    } catch {
+      return file
+    }
+  }))
+}
+
+/** Replace the input's files with the normalized batch (resolve-in-place). */
+function writeBack(input: HTMLInputElement, files: readonly File[]): boolean {
+  try {
+    const transfer = new DataTransfer()
+    for (const file of files) transfer.items.add(file)
+    input.files = transfer.files
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
- * Mobile-only paperclip button in the composer's left tool lane
- * (`conversation.input.left`).
+ * Capture-phase `change` interceptor for the host's own file input.
  *
- * Flow: mount our own picker (accept=image/*, so the gallery can hand back any
- * format), normalize every pick into a host-accepted image (sniff MIME,
- * downscale past the 8192px/64MP ceilings, re-encode below 20MB), then either
- * inject the results into the host's own hidden file input (preferred: the
- * host runs its native thumbnail/upload/vision pipeline) or fall back to a
- * synthetic document drop for host generations without that input.
- * Hidden on wide screens by misc.css.ts (desktop complement block).
+ * Capture runs before React's root-delegated listener, so stopping propagation
+ * here holds the host's `onPickFiles` back until the normalized batch is in
+ * place; the re-dispatched change carries NORMALIZED_FLAG and passes straight
+ * through. Every guard is defensive — any failure leaves the original pick
+ * untouched rather than blocking the host's own pipeline.
+ */
+export function installImageIntakeBridge(): () => void {
+  const onChange = (event: Event): void => {
+    const target = event.target
+    if (!(target instanceof HTMLInputElement)) return
+    if (target.type !== 'file' || target.dataset[OWN_INPUT_FLAG] === '1') return
+    const picked = target.files
+    if (picked === null || picked.length === 0) return
+
+    // Second pass (our own re-dispatch): let it through untouched.
+    if (target.dataset[NORMALIZED_FLAG] === '1') {
+      delete target.dataset[NORMALIZED_FLAG]
+      return
+    }
+
+    // Hold the host's listener back while we rewrite the files.
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+
+    void (async () => {
+      try {
+        const normalized = await normalizeBatch(Array.from(picked))
+        if (writeBack(target, normalized)) {
+          target.dataset[NORMALIZED_FLAG] = '1'
+          target.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+      } catch {
+        // Rewriting failed: release the original pick so the host still runs.
+        target.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+    })()
+  }
+
+  document.addEventListener('change', onChange, true)
+  return () => { document.removeEventListener('change', onChange, true) }
+}
+
+/**
+ * Companion for host generations that ship no file input (pre-0.1.5): renders
+ * the plugin's own paperclip button, which picks, normalizes, and injects into
+ * the host input if one appears later. On 0.1.5+ it renders nothing and only
+ * installs the change bridge.
  */
 export function MobileImagePicker({ t }: MobileImagePickerProps) {
-  if (!INTAKE_SUPPORTED) return null
+  const [needsOwnButton, setNeedsOwnButton] = useState(false)
+
+  useEffect(() => installImageIntakeBridge(), [])
+
+  useEffect(() => {
+    // The host input may mount after this slot renders, so probe on the next
+    // frame and keep watching briefly; only a host that never produces one
+    // (pre-0.1.5) earns the fallback button. Stops as soon as one is found.
+    let raf = 0
+    let tries = 0
+    const probe = (): void => {
+      if (findHostFileInput() !== null) {
+        setNeedsOwnButton(false)
+        return
+      }
+      if (tries >= 20) {
+        setNeedsOwnButton(true)
+        return
+      }
+      tries += 1
+      raf = window.setTimeout(probe, 250)
+    }
+    probe()
+    return () => { window.clearTimeout(raf) }
+  }, [])
 
   const pickImages = async (): Promise<void> => {
     const picked = await new Promise<File[]>((resolve) => {
       const input = document.createElement('input')
       input.type = 'file'
-      // Accept every image the picker can surface; normalization decides support.
       input.accept = 'image/*'
       input.multiple = true
-      // Mount off-screen instead of display:none: some iOS WebKit versions
-      // refuse to open the picker for an unrendered file input.
+      input.dataset[OWN_INPUT_FLAG] = '1'
       input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0'
       document.body.appendChild(input)
       const cleanup = (): void => { input.remove() }
@@ -167,34 +192,20 @@ export function MobileImagePicker({ t }: MobileImagePickerProps) {
         cleanup()
         resolve(files)
       }, { once: true })
-      // `cancel` fires when the user dismisses the picker without choosing;
-      // reclaim the orphan either way (a connected node is never collected).
-      input.addEventListener('cancel', () => {
-        cleanup()
-        resolve([])
-      }, { once: true })
+      input.addEventListener('cancel', () => { cleanup(); resolve([]) }, { once: true })
       input.click()
     })
     if (picked.length === 0) return
 
-    // Normalize concurrently; each failure degrades to its original file so a
-    // single odd format never drops the whole batch.
-    const normalized = await Promise.all(picked.map(async (file) => {
-      try {
-        const result = await normalizeImage(file, NORMALIZE_DEPS)
-        return result.file
-      } catch {
-        return file
-      }
-    }))
-
+    const normalized = await normalizeBatch(picked)
     const hostInput = findHostFileInput()
-    if (hostInput !== null && feedHostInput(hostInput, normalized)) return
-
-    // Fallback for host generations without a file input: stage as one drop.
-    const staged = stageImagesAsDrop(normalized, { makeDataTransfer, makeDragEvent, makeLegacyDropEvent })
-    if (staged !== null) document.dispatchEvent(staged.event)
+    if (hostInput !== null && writeBack(hostInput, normalized)) {
+      hostInput.dataset[NORMALIZED_FLAG] = '1'
+      hostInput.dispatchEvent(new Event('change', { bubbles: true }))
+    }
   }
+
+  if (!needsOwnButton) return null
 
   return (
     <button

@@ -58,13 +58,9 @@ export const MISC_CSS = `@media (max-width: 1023px) and (pointer: coarse) {
     gap: 0 !important;
   }
 
-  /* ---------- image upload entry (conversation.input.left) ----------
-     Injected paperclip button in the composer's left tool lane. The lane's
-     shrink rule (layout.css.ts) targets every direct child except the host
-     _add button, so this pin mirrors the _add exemption: fixed 28px, never
-     squeezed at 320px. Styled as bare lane chrome (transparent ground,
-     inherited icon color) so it reads as native; pressed state reuses the
-     host interactive-bg token with a neutral fallback. */
+  /* Fallback-only paperclip (pre-0.1.5 hosts that ship no file input). On
+     0.1.5+ the companion renders nothing: the host already draws its own
+     paperclip in the round _add chip, and adding a second one crowded it. */
   [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) [data-mobile-nav="image-picker"] {
     flex: none !important;
     width: 28px !important;
@@ -72,22 +68,12 @@ export const MISC_CSS = `@media (max-width: 1023px) and (pointer: coarse) {
     min-width: 28px !important;
     padding: 0 !important;
     border: 0 !important;
-    border-radius: 8px !important;
+    border-radius: 999px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    color: inherit !important;
-    background: transparent !important;
-    /* Horizontal nudge: the lane's leading gap leaves the paperclip a touch
-       right of the host chip's visual center, so the glyph reads off-center.
-       Pull it left; --dsh-web-mobile-image-picker-shift is the single knob
-       (negative = left). Set to 0 to fall back to the raw host gap. */
-    margin-left: var(--dsh-web-mobile-image-picker-shift, -3px) !important;
-  }
-  /* Collapse the lane's own gap before the picker so the nudge is not eaten
-     twice (the host sets the row gap; the picker is its first item there). */
-  [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) > :first-child > [data-mobile-nav="image-picker"] {
-    margin-left: var(--dsh-web-mobile-image-picker-shift, -3px) !important;
+    color: var(--dsw-alias-label-primary, inherit) !important;
+    background: var(--dsw-specific-selector, transparent) !important;
   }
   [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) [data-mobile-nav="image-picker"]:active {
     background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)) !important;
