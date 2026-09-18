@@ -75,6 +75,25 @@ export const MISC_CSS = `@media (max-width: 1023px) and (pointer: coarse) {
     color: var(--dsw-alias-label-primary, inherit) !important;
     background: var(--dsw-specific-selector, transparent) !important;
   }
+  /* Insurance: keep the host's own _add chips dead-centre. The command plus and
+     the file-attach paperclip both sit in a 28px round _add chip; the host sets
+     place-items:center on it, but the tools-lane adaptation pass (layout.css.ts)
+     and DSHA's own overrides have left the glyph a hair off-centre on device.
+     Restating grid centering here is idempotent and cannot move anything that
+     is already centred. */
+  [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) > :first-child > [class*="_add"],
+  [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) > [class*="_trailing"] > [class*="_add"] {
+    display: grid !important;
+    place-items: center !important;
+    place-content: center !important;
+    padding: 0 !important;
+    line-height: 0 !important;
+  }
+  [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) > :first-child > [class*="_add"] > svg,
+  [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) > [class*="_trailing"] > [class*="_add"] > svg {
+    display: block !important;
+    margin: auto !important;
+  }
   [data-phase] [class*="_card"]:has(textarea, [data-composer-input]) [class*="_row"]:has([class*="_trailing"]) [data-mobile-nav="image-picker"]:active {
     background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)) !important;
   }
