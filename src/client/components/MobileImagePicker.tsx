@@ -113,6 +113,9 @@ export function installImageIntakeBridge(): () => void {
     const target = event.target
     if (!(target instanceof HTMLInputElement)) return
     if (target.type !== 'file' || target.dataset[OWN_INPUT_FLAG] === '1') return
+    // Only the composer's own input: other file pickers in the app (plugin
+    // install, import, settings) must keep their original bytes untouched.
+    if (target !== findHostFileInput()) return
     const picked = target.files
     if (picked === null || picked.length === 0) return
 
