@@ -40,7 +40,9 @@
 
 ## 本仓库的改动
 
-相对上游（截至其 `main` 的 `7ae9bcb`），本仓库新增四项改动（即 v2.5.0 更新内容）：
+相对上游（截至其 `main` 的 `7ae9bcb`），本仓库新增以下改动（自 v2.5.0 起累计，逐版明细见下方「更新内容」）：
+
+> **最新版本 v2.5.7-mod** 修好了一处会让多模态能力形同虚设的问题：移动端上传的图片此前无法真正送进模型（DSHA 0.1.5 的附件收件管线不认插件合成的 drop 事件），且相册给出的非标准 MIME（`image/jpg`）、空 MIME、HEIC 以及超尺寸原图都会被宿主准入白名单拒掉。详见「上传图片（视图功能）」与「更新内容 → v2.5.7」。
 
 ### 字号全局联动
 
@@ -55,10 +57,35 @@
 武装期 viewport meta 写入 `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`：不锁缩放，捏合、双击、无障碍文本缩放都交还引擎；软键盘弹出时收缩内容区，输入框不被遮挡。配套 CSS 加固保留：`text-size-adjust: 100%` 禁用引擎字体膨胀，`overscroll-behavior-y: none` 禁用下拉刷新 / 橡皮筋回弹。iOS 聚焦放大由 16px 输入下限 + 捏合回路修复，与缩放不冲突。
 
 ### 上传图片（视图功能）
+输入框左侧工具栏（`conversation.input.left` 槽）新增**图片选择按钮**（回形针图标，仅移动端显示）：点按打开系统图片选择器（多选，仅图片），选中图片**先在设备上归一化**，再直接写入宿主自己的隐藏 `<input type="file">` 并触发 `change`——缩略图预览、上传、消息内嵌图、模型视觉内容块全部复用宿主原生链路。桌面端按钮完全隐藏。
 
-输入框左侧工具栏（`conversation.input.left` 槽）新增**图片选择按钮**（回形针图标，仅移动端显示）：点按打开系统图片选择器（多选、仅图片），选中图片经**合成 document drop 事件**送入宿主原生附件收件通道——缩略图预览、上传、消息内嵌图、模型视觉内容块全部复用宿主原生链路，插件只补移动端入口（宿主 WebUI 无可见上传按钮，触屏无法拖拽）。多模态模型即可直接识别图片中的界面（无需 ADB/无障碍）；文本模型下宿主按原生规则降级（图片省略）。桌面端按钮完全隐藏。
+**为什么要归一化**：宿主附件的准入白名单只有 `image/png`、`image/jpeg`、`image/webp`、`image/gif` 四种（`dsh-attachment-local` 的 `imageLimits.mediaTypes`），客户端的 `imageMediaType()` 对其余类型直接抛 `UnsupportedImageMediaTypeError`。而手机相册经常给出白名单之外的值——安卓选择器会标成非标准的 `image/jpg`，部分云相册返回空 MIME，iPhone 相机胶卷多为 `image/heic` / `image/heif`；相机原图还会顶破宿主的 8192px / 64MP / 20MB 准入上限。这些情况在旧实现下会让一张完全正常的照片变成被丢弃的附件，表现为“模型看不到图片”。
+
+本插件在设备上补齐这一段：按文件头字节嗅探真实容器（JPEG / PNG / GIF / WebP / HEIC / AVIF / BMP），把 `image/jpg` 与空 MIME 纠正回标准类型；超出尺寸 / 像素上限的先降采样，再沿质量阶梯（0.92 → 0.45）重编码到 20MB 以内。普通的小尺寸合规图片直接透传（尺寸归一化交给宿主自带的 sharp 管线，不浪费手机 CPU）；解码失败时回退原始文件，绝不丢图。
 
 ## 更新内容
+
+### v2.5.7
+
+**修复**
+
+- **上传图片在 DSHA 0.1.5 上失效**：旧实现靠合成 `document` drop 事件投递附件，0.1.5 的原生收件管线不认，表现为选完图后输入框毫无反应、附件进不去。现改为直接驱动宿主自己的隐藏 `<input type="file">`（`DataTransfer` 写入 + `change`），完全走原生链路；旧宿主仍保留 drop 回退。
+- **相册格式被宿主拒绝**：安卓常见的非标准 `image/jpg`、部分云相册的空 MIME、iPhone 的 HEIC/HEIF 等都不在宿主准入白名单（仅 png/jpeg/webp/gif）内，客户端会直接抛 `UnsupportedImageMediaTypeError`。现按文件头字节嗅探真实容器并归一化到白名单类型。
+- **相机原图超限被拒**：超过 8192px / 64MP / 20MB 的图片会顶破宿主准入上限。现先在设备上降采样，再沿质量阶梯重编码到限制以内；合规小图仍直接透传，避免白烧 CPU。
+- 上传按钮在工具栏里的水平位置偏右，现提供 `--dsh-web-mobile-image-picker-shift` 旋钮（默认 `-3px`）可在不重新构建的情况下微调。
+
+**优化**
+
+- **抽屉底栏布局**：不删功能的前提下把「文件」「导出会话日志」并到第一行，把「总消耗」移到第二行独占，三者不再挤在一排。
+- **总消耗明细**：总消耗 pill 在总数下方新增**输入 / 输出 / 缓存读 / 缓存写 / 思考**五项明细（`token-usage` 与 `route-guard` 同步折叠并透传分项字段，旧值的总数语义不变）。
+
+**测试**
+
+- 新增 `tests/image-normalize.test.ts`（10 例：容器嗅探、MIME 纠正、超量重编码、解码失败降级、合规透传）；全量 150 例通过。
+
+**说明**
+
+- 本版同时带上此前工作树里未推送的增量：`inline-dsha-modules` 构建步骤、`reconciler-core` / `debug` / `gesture-guard` / `stats-line` / `settings-toolbar-reparent` 加固及其测试、`compress` / `delete-session` 路径守卫。
 
 ### v2.5.6
 
