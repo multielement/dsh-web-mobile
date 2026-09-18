@@ -237,24 +237,25 @@ async function main() {
   )
 
   // A8-A10. viewport meta 所有权（PR #46）：插件武装期间拥有该 meta，宿主
-  // 改写 / 换节点 / 迟到注入都必须被重申。写入内容含 maximum-scale=1 +
-  // user-scalable=no（2026-09-16 所有者决定：安卓钉死缩放，防任何浏览器
-  // 缩放扭曲布局；iOS 忽略这两项，其 #45 恢复路径不受影响）。
+  // 改写 / 换节点 / 迟到注入都必须被重申。写入内容为无缩放 token 的
+  // DSHA 0.1.5 对齐版（2026-09-18 所有者决定，取代 2026-09-16 安卓缩放锁）：
+  // 保留 pinch/双击/无障碍文本缩放，软键盘改为收缩内容区。
+  const EXPECTED_VIEWPORT = 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content'
   const viewportOf = async () =>
     await evalv(`(() => { const m = document.querySelector('meta[name="viewport"]'); return m === null ? null : m.content })()`)
   const armed = await viewportOf()
   check(
-    'A8 武装期 viewport 由插件拥有且带缩放锁',
-    armed === 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
-    `content=${JSON.stringify(armed)} (期望 width/initial-scale/maximum-scale=1/user-scalable=no/viewport-fit: 安卓缩放钉死，iOS 忽略缩放锁)`,
+    'A8 武装期 viewport 由插件拥有',
+    armed === EXPECTED_VIEWPORT,
+    `content=${JSON.stringify(armed)} (期望 ${JSON.stringify(EXPECTED_VIEWPORT)}: 无缩放锁 + 键盘收缩内容区)`,
   )
   await evalv(`(() => { document.querySelector('meta[name="viewport"]').content = 'width=device-width, initial-scale=1, maximum-scale=1' })()`)
   await sleep(200)
   const rewritten = await viewportOf()
   check(
     'A9 宿主改写被重申回来',
-    rewritten === 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
-    `content=${JSON.stringify(rewritten)} (期望重申: 否则缩放锁与 viewport-fit=cover 静默失效)`,
+    rewritten === EXPECTED_VIEWPORT,
+    `content=${JSON.stringify(rewritten)} (期望重申: 否则 viewport-fit=cover 与 keyboard 行为静默失效)`,
   )
   await evalv(`(() => {
     const old = document.querySelector('meta[name="viewport"]')
@@ -268,7 +269,7 @@ async function main() {
   const replaced = await viewportOf()
   check(
     'A10 换节点后新 meta 也被接管',
-    replaced === 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
+    replaced === EXPECTED_VIEWPORT,
     `content=${JSON.stringify(replaced)} (期望重申: head childList observer 必须重新绑定到新节点)`,
   )
 

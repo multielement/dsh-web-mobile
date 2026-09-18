@@ -80,15 +80,15 @@ export declare function detectIosWebKit(nav: {
  * Phone chrome: KEEP the system status bar (no fullscreen) and make it
  * blend into the page. On narrow screens:
  * - The viewport meta is OWNED by the plugin while armed:
- *   width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no,
- *   viewport-fit=cover, re-asserted on every host rewrite, node
- *   replacement, or late injection, so env(safe-area-inset-top) stays the
- *   real status-bar / notch height instead of silently going stale when the
- *   host touches the meta. The zoom tokens pin Android (pinch, double-tap
- *   and accessibility text scaling all locked to 1x so no zoom can distort
- *   the layout); iOS ignores them for user pinch and keeps the >=16px field
- *   floor + pinch-zoom touch-action recovery path (#45). Dispose restores
- *   the host's own content as observed at arm time.
+ *   width=device-width, initial-scale=1, viewport-fit=cover,
+ *   interactive-widget=resizes-content, re-asserted on every host rewrite,
+ *   node replacement, or late injection, so env(safe-area-inset-top) stays
+ *   the real status-bar / notch height instead of silently going stale when
+ *   the host touches the meta. No zoom tokens (DSHA 0.1.5 parity): pinch,
+ *   double-tap and accessibility text scaling stay available; the keyboard
+ *   resizes the content area instead of overlaying the composer. iOS keeps
+ *   the >=16px field floor + pinch-zoom touch-action recovery path (#45).
+ *   Dispose restores the host's own content as observed at arm time.
  * - A theme-color meta tracks the shell background (the official theme is
  *   toggled by body[data-ds-dark-theme], which flips --dsw-alias-bg-base):
  *   Android then paints the status bar / URL bar with the page's own base

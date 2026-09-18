@@ -22,6 +22,12 @@ export interface MobileDrawerFooterProps extends PropsRuntime<'sidebar.footer.ac
   downloadSessionLog: (sessionId: string) => void
   /** Bound ctx.layout.toggleSidebar(): the Files sheet closes the drawer. */
   toggleSidebar: () => void
+  /**
+   * Opens the host's own right-column Files tab (0.1.5+ sidebarRight service).
+   * Returns false when the service is absent (old hosts), so the caller can
+   * fall back to the dsh-web-ui explorer marker.
+   */
+  openHostFiles: () => boolean
 }
 
 /** Browser-locale compact form (1.2万 / 1.2M) for the pill, full form for the tooltip. */
@@ -39,14 +45,16 @@ function formatFull(total: number): string {
  *   corpus, folded by the host half's `/api/mobile-nav.tokens.total` endpoint.
  *   Refreshes on tap. Loads only while the mobile query matches, so desktop
  *   never pays the corpus scan.
- * - Files: opens the dsh-web-ui aionui explorer as a floating bottom sheet
- *   (the explorer column is hidden on mobile until this marker is set, so
- *   the suite's own persisted-expanded state can never cover the UI on load).
+ * - Files: opens the Files surface as a floating bottom sheet. Prefers the
+ *   host-native right panel (0.1.5 sidebarRight service); on older hosts it
+ *   falls back to the dsh-web-ui aionui explorer marker (the explorer column
+ *   is hidden on mobile until that marker is set, so the suite's own
+ *   persisted-expanded state can never cover the UI on load).
  * - Session log: the official session-log-export controller, so the
  *   progress/result dialog is shared with the desktop flow.
  * Hidden entirely on wide screens (CSS media query).
  */
-export function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSidebar, t }: MobileDrawerFooterProps) {
+export function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSidebar, openHostFiles, t }: MobileDrawerFooterProps) {
   const sessionId = useSessions((state) => state.current)
   const [tokens, setTokens] = useState<TokensState>({ status: 'loading' })
 
@@ -77,8 +85,15 @@ export function MobileDrawerFooter({ useSessions, downloadSessionLog, toggleSide
   }, [refreshTokens])
 
   const openExplorer = (): void => {
-    // Yield the preview sheet first (compat.css gives preview precedence
-    // over explorer), then open the explorer and close the drawer.
+    // Host-native right panel first (0.1.5+); it owns its own show/hide, so
+    // just close the drawer afterwards and skip the marker dance.
+    if (openHostFiles()) {
+      toggleSidebar()
+      return
+    }
+    // Fallback (dsh-web-ui): yield the preview sheet first (compat.css gives
+    // preview precedence over explorer), then open the explorer and close
+    // the drawer.
     getFrame()?.removeAttribute('data-aionui-preview-open')
     getFrame()?.setAttribute('data-aionui-explorer-open', '')
     toggleSidebar()

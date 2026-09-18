@@ -51,7 +51,7 @@ CSS module 哈希是包版本的函数；下列前缀是本插件选择器/探�
 - `[data-input-mirror]`/`[data-input-backdrop]` 自 0.1.2 被删（保留为旧宿主兜底，新宿主空转）。
 - client bundle 端点：0.1.2-rc.1 起走合并式 `/plugins/??a/client.js,b/client.js&rev=<12位>`；rev = `sha1sum lib/client.js` 前 12 位（服务端 no-cache，rev 仅缓存 bust；路径猜错拿到 404 空 body，其 sha1 恒 `da39a3ee5e6b`）。
 - `data-conversation-composer-overlay` 渲染在每个活跃 conversation.view 根上（轨迹 tab 同款）；marker 判定只认 `.dsfv-panel`。
-- viewport meta：宿主各版都不带 `maximum-scale`；插件武装期接管并重申 `width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover`（2026-09-16 起带安卓缩放锁，fork 所有者决定）。
+- viewport meta：宿主各版都不带 `maximum-scale`；插件武装期接管并重申 `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`（2026-09-18 fork 所有者决定：与 DSHA 0.1.5 对齐，去掉安卓缩放锁，保留 pinch/双击/无障碍缩放，软键盘收缩内容区）。
 
 ## 4. 升级后验证电池（按序）
 

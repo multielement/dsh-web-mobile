@@ -230,15 +230,16 @@ const IOS_MARKER = 'data-mobile-nav-ios'
 
 /**
  * Viewport content the plugin owns while the mobile branch is armed.
- * Zoom is deliberately PINNED on Android (Oppo Find X8, ColorOS/Chrome
- * and DSHA WebView): maximum-scale=1 + user-scalable=no lock out pinch,
- * double-tap and accessibility text scaling so no browser zoom can ever
- * distort the mobile layout (owner decision 2026-09-16). iOS 10+ ignores
- * both tokens for user pinch, so the iOS side is untouched: the >=16px
- * field floor (data-mobile-nav-ios) is the focus-zoom fix and the root
+ * Zoom-free, aligned with the DSHA 0.1.5 viewport (owner decision
+ * 2026-09-18, superseding the 2026-09-16 Android zoom lock): no
+ * maximum-scale / user-scalable tokens, so pinch, double-tap and
+ * accessibility text scaling stay with the engine. `interactive-widget
+ * =resizes-content` makes the on-screen keyboard shrink the content area
+ * (the composer stays visible) instead of overlaying it. The iOS focus-zoom
+ * fix remains the >=16px field floor (data-mobile-nav-ios) and the root
  * touch-action keeps pinch-zoom as the recovery path (#45).
  */
-const VIEWPORT_CONTENT = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
+const VIEWPORT_CONTENT = 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content'
 
 const findViewportMeta = (): HTMLMetaElement | null =>
   document.querySelector<HTMLMetaElement>('meta[name="viewport"]')
@@ -247,15 +248,15 @@ const findViewportMeta = (): HTMLMetaElement | null =>
  * Phone chrome: KEEP the system status bar (no fullscreen) and make it
  * blend into the page. On narrow screens:
  * - The viewport meta is OWNED by the plugin while armed:
- *   width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no,
- *   viewport-fit=cover, re-asserted on every host rewrite, node
- *   replacement, or late injection, so env(safe-area-inset-top) stays the
- *   real status-bar / notch height instead of silently going stale when the
- *   host touches the meta. The zoom tokens pin Android (pinch, double-tap
- *   and accessibility text scaling all locked to 1x so no zoom can distort
- *   the layout); iOS ignores them for user pinch and keeps the >=16px field
- *   floor + pinch-zoom touch-action recovery path (#45). Dispose restores
- *   the host's own content as observed at arm time.
+ *   width=device-width, initial-scale=1, viewport-fit=cover,
+ *   interactive-widget=resizes-content, re-asserted on every host rewrite,
+ *   node replacement, or late injection, so env(safe-area-inset-top) stays
+ *   the real status-bar / notch height instead of silently going stale when
+ *   the host touches the meta. No zoom tokens (DSHA 0.1.5 parity): pinch,
+ *   double-tap and accessibility text scaling stay available; the keyboard
+ *   resizes the content area instead of overlaying the composer. iOS keeps
+ *   the >=16px field floor + pinch-zoom touch-action recovery path (#45).
+ *   Dispose restores the host's own content as observed at arm time.
  * - A theme-color meta tracks the shell background (the official theme is
  *   toggled by body[data-ds-dark-theme], which flips --dsw-alias-bg-base):
  *   Android then paints the status bar / URL bar with the page's own base

@@ -202,6 +202,25 @@ export function apply(ctx: ClientContext): void {
   // repros. No-op without the query param (docs: README, AGENTS.md).
   installDebugBadge(ctx)
 
+  // 0.1.5 host-native right panel: when the sidebarRight service is present,
+  // the Files entry opens the host's own right-column tab ("files") instead
+  // of setting the dsh-web-ui explorer marker. Probed at click time and
+  // wrapped defensively: the service is absent on <=0.1.2 hosts (where the
+  // type augmentation still types it as present), and a fiber accessor or a
+  // service in a bad state must degrade to the dsh-web-ui fallback rather
+  // than throw inside the button handler. Returns true only when the host
+  // call was actually issued.
+  const openHostFiles = (): boolean => {
+    try {
+      const service = (ctx as { sidebarRight?: { openTab?: (kind: string) => void } }).sidebarRight
+      if (service === undefined || typeof service.openTab !== 'function') return false
+      service.openTab('files')
+      return true
+    } catch {
+      return false
+    }
+  }
+
   ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
     name: 'conversation.session.header.actions',
     id: 'mobile-nav-toggle',
@@ -209,6 +228,7 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: () => ({
       toggleSidebar: () => ctx.layout.toggleSidebar(),
+      openHostFiles,
     }),
   }, MobileNavToggle))
 
@@ -248,6 +268,7 @@ export function apply(ctx: ClientContext): void {
       downloadSessionLog: (sessionId: string) =>
         ctx.sessionLogDownload.download(sessionId as unknown as DownloadSessionId),
       toggleSidebar: () => ctx.layout.toggleSidebar(),
+      openHostFiles,
     }),
   }, MobileDrawerFooter))
 }
@@ -258,6 +279,7 @@ export function apply(ctx: ClientContext): void {
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-session-log-export/client'
