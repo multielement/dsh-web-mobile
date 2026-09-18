@@ -21,6 +21,24 @@ function fakeDecoded(width: number, height: number, hasAlpha = false): DecodedIm
 }
 
 /** A minimal File stand-in (node has no DOM File for our purposes). */
+/**
+ * Build the leading bytes of a JPEG of the given pixel size: SOI, a JFIF APP0
+ * segment, then the SOF0 frame header. Enough for sniffImageSize to read the
+ * geometry without any real pixel data behind it.
+ */
+function jpegHead(width: number, height: number): Uint8Array {
+  return new Uint8Array([
+    0xff, 0xd8,                                              // SOI
+    0xff, 0xe0, 0x00, 0x10,                                  // APP0, length 16
+    0x4a, 0x46, 0x49, 0x46, 0x00,                            // "JFIF\0"
+    0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,    // version + density
+    0xff, 0xc0, 0x00, 0x11, 0x08,                            // SOF0, length 17, precision 8
+    (height >> 8) & 0xff, height & 0xff,
+    (width >> 8) & 0xff, width & 0xff,
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+  ])
+}
+
 function fakeFile(name: string, type: string, size: number): File {
   const blob = new Blob([new Uint8Array(Math.min(size, 64))], { type })
   const file = blob as unknown as File
@@ -103,16 +121,40 @@ test('normalizeImage: oversized bytes force a re-encode within the dimension cei
 
 test('normalizeImage: legal MIME + legal bytes pass through (host normalizes size)', async () => {
   // dsh-attachment-local re-encodes to its own 4MP/4MB policy server-side, so
-  // the client must not burn CPU decoding every ordinary camera JPEG.
+  // the client must not burn CPU decoding every ordinary camera JPEG. The gate
+  // the client DOES have to respect is the host's hard one (64MP / 8192px /
+  // 20MB), and that is judged from the header, not the byte count: this file
+  // is 5MB but only 12MP, so it sails through untouched.
   const file = fakeFile('photo.jpg', 'image/jpeg', 5 * 1024 * 1024)
   let decoded = false
   const result = await normalizeImage(file, {
-    readHead: async () => bytes('ffd8ff'),
+    readHead: async () => jpegHead(4000, 3000),
     decode: async () => { decoded = true; return fakeDecoded(4000, 3000) },
   })
   assert.equal(result.changed, false)
   assert.equal(result.reason, 'passthrough')
   assert.equal(decoded, false)
+})
+
+test('normalizeImage: an oversized canvas is caught from the header alone', async () => {
+  // A 200MP capture can compress under the 20MB byte ceiling and still blow the
+  // 64MP pixel ceiling, which the host refuses outright. The header exposes the
+  // real size, so the normalizer downscales without ever trusting file.size.
+  const file = fakeFile('huge.jpg', 'image/jpeg', 2 * 1024 * 1024)
+  const drawn: Array<[number, number]> = []
+  const result = await normalizeImage(file, {
+    readHead: async () => jpegHead(16000, 12500),
+    decode: async () => ({
+      ...fakeDecoded(16000, 12500),
+      draw: (_ctx: CanvasRenderingContext2D, w: number, h: number) => { drawn.push([w, h]) },
+    }),
+    createCanvas: () => ({ width: 0, height: 0, getContext: () => ({ drawImage: () => {} }) }) as unknown as HTMLCanvasElement,
+    encodeBlob: async () => new Blob([new Uint8Array(1024)], { type: 'image/jpeg' }),
+  })
+  assert.equal(result.changed, true)
+  assert.equal(drawn.length, 1)
+  const [w, h] = drawn[0] ?? [0, 0]
+  assert.ok(w <= 4096 && h <= 4096, 'expected <=4096, got ' + w + 'x' + h)
 })
 
 test('normalizeImage: decode failure degrades to the original file', async () => {

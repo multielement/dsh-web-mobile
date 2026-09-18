@@ -42,6 +42,25 @@ export declare class ImageDecodeError extends Error {
  * @returns a MIME type when recognised, otherwise null.
  */
 export declare function sniffMediaType(head: Uint8Array): string | null;
+/**
+ * Read a PNG / JPEG / WebP pixel size straight out of the header.
+ *
+ * The host enforces two different size gates and only one of them rejects:
+ * `imageLimits` (64MP / 8192px / 20MB) throws, while `normalizationPolicy`
+ * (4MP / 8192px / 4MB) is simply what the host re-encodes down to on its own.
+ * A byte-count proxy for geometry therefore gets both cases wrong: a 5MB
+ * 12MP phone JPEG needs no help at all, while a heavily compressed
+ * 200MP capture can sit under 20MB and still be refused outright.
+ *
+ * Parsing the header is exact and costs one small read, so the caller can
+ * decide on real numbers instead of guessing from `file.size`.
+ * @param head - leading bytes of the file (4KB is far more than enough).
+ * @returns the pixel size, or null when the header is not recognised.
+ */
+export declare function sniffImageSize(head: Uint8Array): {
+    width: number;
+    height: number;
+} | null;
 /** Decoded handle the pipeline draws from (an ImageBitmap in the browser). */
 export interface DecodedImage {
     readonly width: number;

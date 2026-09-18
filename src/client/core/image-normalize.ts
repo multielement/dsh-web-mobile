@@ -71,6 +71,85 @@ export function sniffMediaType(head: Uint8Array): string | null {
   return null
 }
 
+/**
+ * Read a PNG / JPEG / WebP pixel size straight out of the header.
+ *
+ * The host enforces two different size gates and only one of them rejects:
+ * `imageLimits` (64MP / 8192px / 20MB) throws, while `normalizationPolicy`
+ * (4MP / 8192px / 4MB) is simply what the host re-encodes down to on its own.
+ * A byte-count proxy for geometry therefore gets both cases wrong: a 5MB
+ * 12MP phone JPEG needs no help at all, while a heavily compressed
+ * 200MP capture can sit under 20MB and still be refused outright.
+ *
+ * Parsing the header is exact and costs one small read, so the caller can
+ * decide on real numbers instead of guessing from `file.size`.
+ * @param head - leading bytes of the file (4KB is far more than enough).
+ * @returns the pixel size, or null when the header is not recognised.
+ */
+export function sniffImageSize(head: Uint8Array): { width: number, height: number } | null {
+  const be16 = (i: number): number => ((head[i] ?? 0) << 8) | (head[i + 1] ?? 0)
+  const be32 = (i: number): number =>
+    (((head[i] ?? 0) << 24) | ((head[i + 1] ?? 0) << 16) | ((head[i + 2] ?? 0) << 8) | (head[i + 3] ?? 0)) >>> 0
+  const le16 = (i: number): number => (head[i] ?? 0) | ((head[i + 1] ?? 0) << 8)
+
+  // PNG: IHDR is always the first chunk — width/height are big-endian at 16..24.
+  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) {
+    return { width: be32(16), height: be32(20) }
+  }
+
+  // GIF: logical screen descriptor is little-endian at 6..10.
+  if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x38) {
+    return { width: le16(6), height: le16(8) }
+  }
+
+  // WebP: RIFF container, three sub-formats.
+  if (head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
+    && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) {
+    const fourcc = String.fromCharCode(head[12] ?? 0, head[13] ?? 0, head[14] ?? 0, head[15] ?? 0)
+    if (fourcc === 'VP8X') {
+      // Canvas size minus one, 24-bit little-endian, at 24..30.
+      const w = (head[24] ?? 0) | ((head[25] ?? 0) << 8) | ((head[26] ?? 0) << 16)
+      const h = (head[27] ?? 0) | ((head[28] ?? 0) << 8) | ((head[29] ?? 0) << 16)
+      return { width: w + 1, height: h + 1 }
+    }
+    if (fourcc === 'VP8 ') {
+      // Lossy: 14-bit dimensions follow the 3-byte start code at 26..30.
+      const w = ((head[26] ?? 0) | ((head[27] ?? 0) << 8)) & 0x3fff
+      const h = ((head[28] ?? 0) | ((head[29] ?? 0) << 8)) & 0x3fff
+      return w > 0 && h > 0 ? { width: w, height: h } : null
+    }
+    if (fourcc === 'VP8L') {
+      // Lossless: 14-bit each, packed into a little-endian 32-bit at 21..25.
+      const bits = ((head[21] ?? 0) | ((head[22] ?? 0) << 8) | ((head[23] ?? 0) << 16) | ((head[24] ?? 0) << 24)) >>> 0
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+    }
+    return null
+  }
+
+  // JPEG: walk the segment chain to the first SOFn frame header. Baseline and
+  // progressive both carry height/width at +5/+7 of the frame segment.
+  if (head[0] === 0xff && head[1] === 0xd8) {
+    let i = 2
+    while (i + 9 < head.length) {
+      if (head[i] !== 0xff) { i += 1; continue }
+      const marker = head[i + 1] ?? 0
+      // Standalone markers carry no length payload.
+      if (marker === 0xff || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) { i += 2; continue }
+      const length = be16(i + 2)
+      if (length < 2) return null
+      // SOF0..SOF3, SOF5..SOF7, SOF9..SOF11, SOF13..SOF15 (skip DHT 0xC4, JPG 0xC8, DAC 0xCC).
+      const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+      if (isSof) {
+        return { height: be16(i + 5), width: be16(i + 7) }
+      }
+      i += 2 + length
+    }
+    return null
+  }
+
+  return null
+}
+
 /** Decoded handle the pipeline draws from (an ImageBitmap in the browser). */
 export interface DecodedImage {
   readonly width: number
@@ -116,6 +195,14 @@ export interface NormalizeDeps {
 const TARGET_MAX_DIMENSION = 4096
 /** Quality ladder walked until the encoded blob fits maxBytes. */
 const QUALITY_LADDER = [0.92, 0.85, 0.75, 0.6, 0.45]
+
+/**
+ * Byte size assumed safe when the header could not be read at all. Chosen well
+ * under the host's 20MB gate, so an unparsable container small enough to sit
+ * here is admitted rather than pointlessly re-encoded; anything larger takes
+ * the decode path where the real geometry is enforced.
+ */
+const UNKNOWN_GEOMETRY_BYTES = 4 * 1024 * 1024
 
 /** Extension for a normalized type (host prefers a real name on the wire). */
 function extensionFor(type: string): string {
@@ -181,7 +268,31 @@ export async function normalizeImage(file: File, deps: NormalizeDeps = {}): Prom
 
   const accepted = HOST_IMAGE_TYPES.includes(type)
   const withinBytes = file.size <= limits.maxBytes
-  if (accepted && withinBytes && type === file.type) {
+
+  // The host's hard gate is 64MP / 8192px / 20MB — over that it refuses the
+  // attachment outright. Its 4MP / 4MB figures are only the policy it
+  // re-encodes down to by itself, so a file inside the gate needs no help even
+  // when it is larger than 4MB. Ask the header for the real pixel size instead
+  // of guessing from the byte count (a 5MB 12MP JPEG is fine; a 2MB 200MP
+  // capture is not). When the header cannot be parsed we fall back to the
+  // byte-size heuristic, which is conservative in the safe direction.
+  let withinGeometry: boolean
+  if (deps.readHead !== undefined) {
+    let size: { width: number, height: number } | null = null
+    try {
+      size = sniffImageSize(await deps.readHead(file, 4096))
+    } catch {
+      size = null
+    }
+    withinGeometry = size === null
+      ? file.size <= UNKNOWN_GEOMETRY_BYTES
+      : size.width <= limits.maxDimension && size.height <= limits.maxDimension
+        && size.width * size.height <= limits.maxPixels
+  } else {
+    withinGeometry = file.size <= UNKNOWN_GEOMETRY_BYTES
+  }
+
+  if (accepted && withinBytes && withinGeometry && type === file.type) {
     return { file, changed: false, reason: 'passthrough' }
   }
 
@@ -202,6 +313,13 @@ export async function normalizeImage(file: File, deps: NormalizeDeps = {}): Prom
 
   try {
     const fitted = fitWithin(decoded.width, decoded.height, Math.min(limits.maxDimension, TARGET_MAX_DIMENSION), limits.maxPixels)
+    // Decoded only to prove the geometry: if it already fits and nothing else
+    // needs changing, hand back the original bytes rather than a re-encode
+    // (re-encoding costs quality and time for no gain).
+    const geometryAlreadyFits = fitted.width === decoded.width && fitted.height === decoded.height
+    if (geometryAlreadyFits && accepted && withinBytes && type === file.type) {
+      return { file, changed: false, reason: 'geometry-ok' }
+    }
     const canvas = deps.createCanvas()
     canvas.width = fitted.width
     canvas.height = fitted.height
@@ -220,7 +338,7 @@ export async function normalizeImage(file: File, deps: NormalizeDeps = {}): Prom
     }
     if (best === null) return { file, changed: false, reason: 'encode-failed' }
 
-    const outType = accepted && best.size === file.size ? type : (best.type === '' ? encodeType : best.type)
+    const outType = best.type === '' ? encodeType : best.type
     const outFile = new File([best], renameFor(file.name, outType), { type: outType, lastModified: file.lastModified })
     return { file: outFile, changed: true }
   } finally {
